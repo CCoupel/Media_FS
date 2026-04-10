@@ -84,24 +84,25 @@ Z:\
 
 ### P0 — MVP
 
-| Fonctionnalité | Détail |
-|---|---|
-| Montage d'un serveur Jellyfin ou Emby | Authentification par API key ou login/password |
-| Navigation des bibliothèques | Films, Séries, Musique, Photos selon les libraries du serveur |
-| Lecture streaming | Open-in-place : VLC/MPV ouvrent le fichier directement via HTTP range |
-| Copie locale | L'explorateur peut copier le fichier — téléchargement par chunks parallèles (voir ci-dessous) |
-| Taille de fichier correcte | Rapportée depuis les métadonnées API, pas streamée |
-| Multi-serveurs simultanés | Plusieurs dossiers `user@server` montés en même temps |
-| Configuration par fichier | `config.yaml` décrivant les serveurs, credentials, options |
+| Fonctionnalité | Détail | Issue |
+|---|---|---|
+| Montage WinFSP (Windows) | Lecteur `Z:` dans l'explorateur Windows | [#1](https://github.com/CCoupel/Media_FS/issues/1) |
+| Montage FUSE (Linux) | Point de montage `/mnt/mediafs` | [#2](https://github.com/CCoupel/Media_FS/issues/2) |
+| Connecteur Jellyfin | Auth, navigation, streaming | [#3](https://github.com/CCoupel/Media_FS/issues/3) |
+| Connecteur Emby | Adapte Jellyfin, header auth différent | [#4](https://github.com/CCoupel/Media_FS/issues/4) |
+| Lecture streaming | HTTP Range, seek depuis VLC/MPV | [#5](https://github.com/CCoupel/Media_FS/issues/5) |
+| Copie locale parallèle | N chunks simultanés via HTTP Range | [#6](https://github.com/CCoupel/Media_FS/issues/6) |
+| System tray + config UI | Tray menu, UI web localhost | [#7](https://github.com/CCoupel/Media_FS/issues/7) |
+| Multi-serveurs + config.yaml | Plusieurs `user@server` simultanés | [#8](https://github.com/CCoupel/Media_FS/issues/8) |
 
 ### P1.1 — Métadonnées : attributs standard + sidecar
 
-| Fonctionnalité | Détail |
-|---|---|
-| Attributs fichiers corrects | Taille réelle, date de modification = date d'ajout à la bibliothèque |
-| Fichiers `.nfo` générés à la volée | Format compatible Kodi/Jellyfin/Emby (XML) |
-| Images sidecar | `poster.jpg`, `fanart.jpg`, `thumb.jpg`, `folder.jpg` selon le type de média |
-| Structure miroir Emby | Arborescence identique à ce qu'Emby/Jellyfin génèrerait sur disque |
+| Fonctionnalité | Détail | Issue |
+|---|---|---|
+| Attributs fichiers corrects | Taille réelle, mtime = date d'ajout | [#9](https://github.com/CCoupel/Media_FS/issues/9) |
+| Fichiers `.nfo` générés à la volée | Format Kodi XML (movie, tvshow, episode) | [#10](https://github.com/CCoupel/Media_FS/issues/10) |
+| Images sidecar | poster, fanart, thumb, folder selon le type | [#11](https://github.com/CCoupel/Media_FS/issues/11) |
+| Cache SQLite | TTLs différenciés par type de donnée | [#12](https://github.com/CCoupel/Media_FS/issues/12) |
 
 Format `.nfo` films (Kodi standard) :
 ```xml
@@ -117,7 +118,7 @@ Format `.nfo` films (Kodi standard) :
 </movie>
 ```
 
-### P1.2 — Windows Shell Properties
+### P1.2 — Windows Shell Properties — [#13](https://github.com/CCoupel/Media_FS/issues/13)
 
 | Fonctionnalité | Détail |
 |---|---|
@@ -131,7 +132,7 @@ Format `.nfo` films (Kodi standard) :
 - Toute tentative d'écriture (rename, delete, create) retourne `EPERM` / `STATUS_ACCESS_DENIED`
 - Les fichiers `.nfo` et images sont **virtuels** (générés en mémoire), jamais écrits sur le serveur
 
-### P3 — Plex
+### P3 — Plex — [#14](https://github.com/CCoupel/Media_FS/issues/14)
 
 Même fonctionnalités que Jellyfin/Emby. API différente (Plex Media Server API, authentification via `X-Plex-Token`). Scope isolé, développé séparément.
 
@@ -266,7 +267,7 @@ cache:
 
 ---
 
-## CLI
+## CLI — [#15](https://github.com/CCoupel/Media_FS/issues/15)
 
 ```bash
 mediafs mount                     # monte tous les serveurs actifs

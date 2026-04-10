@@ -17,7 +17,7 @@ type MediaConnector interface {
 }
 ```
 
-## Jellyfin / Emby
+## Jellyfin / Emby — issues [#3](https://github.com/CCoupel/Media_FS/issues/3) [#4](https://github.com/CCoupel/Media_FS/issues/4)
 
 Jellyfin and Emby share the same REST API structure (Emby is the upstream, Jellyfin is a fork). The Jellyfin connector is the base implementation; the Emby connector wraps it, overriding only the auth header (`X-Emby-Token` vs `X-MediaBrowser-Token`).
 
@@ -40,7 +40,7 @@ Auth: pass API key as `X-MediaBrowser-Token` (Jellyfin) or `X-Emby-Token` (Emby)
 5. Add icon to `assets/icons/{name}.ico`
 6. Add to tray icon map in `internal/tray/tray.go`
 
-## Plex (P3)
+## Plex (P3) — issue [#14](https://github.com/CCoupel/Media_FS/issues/14)
 
 Plex uses a different auth model (`X-Plex-Token`) and different endpoint structure. Implement as a standalone connector without reusing the Jellyfin base.
 

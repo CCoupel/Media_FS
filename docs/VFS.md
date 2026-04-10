@@ -2,8 +2,8 @@
 
 ## Library
 
-- **Windows**: `github.com/billziss-gh/cgofuse` wrapping WinFSP. Requires WinFSP installed on the target machine.
-- **Linux**: same library, wrapping libfuse3. Requires `libfuse3-dev` at build time, `libfuse3` at runtime.
+- **Windows**: `github.com/billziss-gh/cgofuse` wrapping WinFSP. Requires WinFSP installed on the target machine. → [issue #1](https://github.com/CCoupel/Media_FS/issues/1)
+- **Linux**: same library, wrapping libfuse3. Requires `libfuse3-dev` at build time, `libfuse3` at runtime. → [issue #2](https://github.com/CCoupel/Media_FS/issues/2)
 
 The same Go code runs on both platforms — cgofuse abstracts the OS difference.
 
@@ -34,7 +34,7 @@ All write methods (`Write`, `Create`, `Mkdir`, `Unlink`, `Rename`) return `-fuse
 
 Path-to-itemID resolution is cached. On cache miss, walk the tree from the nearest cached ancestor.
 
-## Virtual files
+## Virtual files — issues [#10](https://github.com/CCoupel/Media_FS/issues/10) [#11](https://github.com/CCoupel/Media_FS/issues/11) [#16](https://github.com/CCoupel/Media_FS/issues/16)
 
 Files not present in the server's item list but synthesized by Media_FS:
 
