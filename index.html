@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Media_FS — Browse your media library from Windows Explorer</title>
+  <meta name="description" content="Virtual filesystem (WinFSP/FUSE) that exposes Jellyfin, Emby and Plex libraries as a native drive in Windows Explorer or Linux file managers.">
+  <meta property="og:title" content="Media_FS">
+  <meta property="og:description" content="Mount your Jellyfin / Emby / Plex library as a drive. Browse, stream, copy — from any app.">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:      #0d1117; --bg2: #161b22; --bg3: #21262d;
+      --border:  #30363d; --text: #e6edf3; --muted: #8b949e;
+      --accent:  #3b82f6; --green: #3fb950; --yellow: #d29922;
+      --red:     #f85149; --purple: #bc8cff; --radius: 10px;
+    }
+    html { scroll-behavior: smooth; }
+    body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; line-height: 1.6; }
+
+    nav { position: sticky; top: 0; z-index: 100; background: rgba(13,17,23,.9); backdrop-filter: blur(12px); border-bottom: 1px solid var(--border); padding: .75rem 2rem; display: flex; align-items: center; justify-content: space-between; }
+    nav .logo { font-weight: 700; font-size: 1.1rem; display: flex; align-items: center; gap: .5rem; }
+    nav .logo .accent { color: var(--accent); }
+    nav ul { list-style: none; display: flex; gap: 1.5rem; }
+    nav a { color: var(--muted); text-decoration: none; font-size: .9rem; transition: color .15s; }
+    nav a:hover { color: var(--text); }
+    nav .gh-link { background: var(--bg3); border: 1px solid var(--border); border-radius: 6px; padding: .3rem .8rem; color: var(--text) !important; font-size: .85rem; }
+
+    .hero { text-align: center; padding: 6rem 2rem 4rem; max-width: 860px; margin: 0 auto; }
+    .hero-badge { display: inline-flex; align-items: center; gap: .4rem; background: var(--bg2); border: 1px solid var(--border); border-radius: 999px; padding: .25rem .9rem; font-size: .8rem; color: var(--muted); margin-bottom: 1.5rem; }
+    .hero-badge .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+    .hero h1 { font-size: clamp(2.2rem, 6vw, 3.6rem); font-weight: 800; letter-spacing: -.02em; line-height: 1.1; margin-bottom: 1.25rem; }
+    .hero h1 .gradient { background: linear-gradient(135deg, var(--accent), var(--purple)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+    .hero p { font-size: 1.15rem; color: var(--muted); max-width: 600px; margin: 0 auto 2rem; }
+    .hero-actions { display: flex; gap: .75rem; justify-content: center; flex-wrap: wrap; }
+    .btn { display: inline-flex; align-items: center; gap: .4rem; padding: .6rem 1.4rem; border-radius: 8px; font-size: .9rem; font-weight: 600; text-decoration: none; border: none; transition: opacity .15s, transform .1s; }
+    .btn:hover { opacity: .88; transform: translateY(-1px); }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-outline  { background: transparent; border: 1px solid var(--border); color: var(--text); }
+
+    .stats-bar { display: flex; justify-content: center; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); background: var(--bg2); overflow-x: auto; }
+    .stat-item { display: flex; flex-direction: column; align-items: center; padding: 1.25rem 2.5rem; border-right: 1px solid var(--border); min-width: 140px; }
+    .stat-item:last-child { border-right: none; }
+    .stat-value { font-size: 1.5rem; font-weight: 700; }
+    .stat-label { font-size: .75rem; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-top: .1rem; }
+    .stat-value.loading { color: var(--border); }
+
+    section { padding: 5rem 2rem; }
+    .section-inner { max-width: 1100px; margin: 0 auto; }
+    .section-title { font-size: 1.6rem; font-weight: 700; margin-bottom: .5rem; }
+    .section-sub { color: var(--muted); margin-bottom: 3rem; font-size: .95rem; }
+
+    .features-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem; }
+    .feature-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.5rem; transition: border-color .2s, transform .15s; }
+    .feature-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+    .feature-icon { font-size: 1.8rem; margin-bottom: .75rem; }
+    .feature-title { font-weight: 700; font-size: 1rem; margin-bottom: .4rem; }
+    .feature-desc { color: var(--muted); font-size: .875rem; line-height: 1.6; }
+    .tag { display: inline-block; font-size: .7rem; font-weight: 600; padding: .15rem .5rem; border-radius: 4px; margin-top: .6rem; margin-right: .25rem; }
+    .tag-green  { background: rgba(63,185,80,.15);  color: var(--green); }
+    .tag-blue   { background: rgba(59,130,246,.15); color: var(--accent); }
+    .tag-yellow { background: rgba(210,153,34,.15); color: var(--yellow); }
+    .tag-purple { background: rgba(188,140,255,.15); color: var(--purple); }
+
+    #architecture { background: var(--bg2); }
+    .arch-block { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.5rem 2rem; overflow-x: auto; }
+    .arch-block pre { font-family: 'SF Mono', 'Fira Code', monospace; font-size: .8rem; color: #79c0ff; line-height: 1.7; }
+
+    .roadmap-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; }
+    .roadmap-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+    .roadmap-header { padding: .75rem 1rem; display: flex; align-items: center; justify-content: space-between; font-weight: 700; font-size: .9rem; border-bottom: 1px solid var(--border); }
+    .badge { font-size: .7rem; font-weight: 700; padding: .1rem .4rem; border-radius: 4px; }
+    .badge-wip     { background: rgba(59,130,246,.2);  color: var(--accent); }
+    .badge-planned { background: rgba(139,148,158,.15); color: var(--muted); }
+    .roadmap-items { padding: .75rem 1rem; }
+    .roadmap-item { display: flex; align-items: flex-start; gap: .5rem; font-size: .85rem; color: var(--muted); padding: .3rem 0; border-bottom: 1px solid var(--border); }
+    .roadmap-item:last-child { border-bottom: none; }
+
+    #issues { background: var(--bg2); }
+    .issues-list { display: flex; flex-direction: column; gap: .5rem; }
+    .issue-row { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: .75rem 1rem; display: flex; align-items: flex-start; gap: .75rem; text-decoration: none; color: inherit; transition: border-color .15s; }
+    .issue-row:hover { border-color: var(--accent); }
+    .issue-num   { color: var(--muted); font-size: .8rem; flex-shrink: 0; padding-top: 2px; white-space: nowrap; }
+    .issue-title { font-size: .9rem; flex: 1; }
+    .issue-labels { display: flex; gap: .35rem; flex-wrap: wrap; margin-top: .3rem; }
+    .issue-label { font-size: .65rem; font-weight: 600; padding: .1rem .4rem; border-radius: 999px; border: 1px solid transparent; }
+    .issue-age   { color: var(--muted); font-size: .75rem; flex-shrink: 0; white-space: nowrap; }
+    .issues-empty { color: var(--muted); font-size: .9rem; padding: 2rem; text-align: center; background: var(--bg); border: 1px dashed var(--border); border-radius: var(--radius); }
+    .issues-footer { margin-top: .75rem; text-align: right; }
+    .issues-footer a { font-size: .8rem; color: var(--accent); text-decoration: none; }
+
+    code { background: var(--bg3); border: 1px solid var(--border); border-radius: 5px; padding: .15rem .4rem; font-family: 'SF Mono', 'Fira Code', monospace; font-size: .82rem; color: #79c0ff; }
+    .code-block { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.25rem 1.5rem; font-family: 'SF Mono', 'Fira Code', monospace; font-size: .82rem; color: #e6edf3; line-height: 1.8; overflow-x: auto; }
+    .code-block .c { color: var(--muted); }
+    .code-block .k { color: #79c0ff; }
+    .code-block .f { color: var(--green); }
+
+    .install-steps { display: flex; flex-direction: column; gap: 1.25rem; }
+    .install-step { display: flex; gap: 1rem; }
+    .step-num { width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: #fff; font-size: .8rem; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 2px; }
+    .step-content h4 { font-size: .95rem; margin-bottom: .3rem; }
+    .step-content p  { font-size: .85rem; color: var(--muted); margin-bottom: .4rem; }
+    .step-content a  { color: var(--accent); }
+
+    footer { background: var(--bg2); border-top: 1px solid var(--border); padding: 2rem; text-align: center; color: var(--muted); font-size: .85rem; }
+    footer a { color: var(--accent); text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
+    .footer-links { display: flex; justify-content: center; gap: 1.5rem; margin-bottom: .75rem; flex-wrap: wrap; }
+
+    @media (max-width: 640px) {
+      nav ul { display: none; }
+      .stat-item { min-width: 50%; border-right: none; border-bottom: 1px solid var(--border); }
+    }
+  </style>
+</head>
+<body>
+
+<nav>
+  <div class="logo">🎬 <span class="accent">Media</span>_FS</div>
+  <ul>
+    <li><a href="#features">Features</a></li>
+    <li><a href="#roadmap">Roadmap</a></li>
+    <li><a href="#issues">Issues</a></li>
+    <li><a href="#install">Install</a></li>
+  </ul>
+  <a href="https://github.com/CCoupel/Media_FS" class="gh-link" target="_blank" rel="noopener">⭐ GitHub</a>
+</nav>
+
+<div class="hero">
+  <div class="hero-badge">
+    <span class="dot"></span>
+    <span id="version-badge">v0.1.0-dev</span>
+    &nbsp;·&nbsp; Go + WinFSP / FUSE
+  </div>
+  <h1>Browse your <span class="gradient">media library</span><br>like a local drive</h1>
+  <p>Media_FS exposes Jellyfin, Emby and Plex as a virtual filesystem — mountable in Windows Explorer or any Linux file manager. Stream, copy, browse without leaving your OS.</p>
+  <div class="hero-actions">
+    <a href="https://github.com/CCoupel/Media_FS" class="btn btn-primary" target="_blank" rel="noopener">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+      View on GitHub
+    </a>
+    <a href="#install" class="btn btn-outline">Get Started →</a>
+  </div>
+</div>
+
+<div class="stats-bar">
+  <div class="stat-item">
+    <span class="stat-value loading" id="stat-version">—</span>
+    <span class="stat-label">Latest Release</span>
+  </div>
+  <div class="stat-item">
+    <span class="stat-value loading" id="stat-issues">—</span>
+    <span class="stat-label">Open Issues</span>
+  </div>
+  <div class="stat-item">
+    <span class="stat-value">Go</span>
+    <span class="stat-label">Language</span>
+  </div>
+  <div class="stat-item">
+    <span class="stat-value loading" id="stat-updated">—</span>
+    <span class="stat-label">Last Updated</span>
+  </div>
+  <div class="stat-item">
+    <span class="stat-value">MIT</span>
+    <span class="stat-label">License</span>
+  </div>
+</div>
+
+<section id="features">
+  <div class="section-inner">
+    <div class="section-title">Everything you need to browse your library natively</div>
+    <p class="section-sub">No extra client needed — your OS file manager becomes your media browser.</p>
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon">🪟</div>
+        <div class="feature-title">Windows Explorer &amp; Linux file managers</div>
+        <div class="feature-desc">Powered by WinFSP on Windows and FUSE 3 on Linux. Your library appears as a real drive letter (e.g. <code>Z:</code>) — no special client required.</div>
+        <span class="tag tag-blue">WinFSP</span><span class="tag tag-blue">FUSE 3</span>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🔗</div>
+        <div class="feature-title">Multi-server, unified tree</div>
+        <div class="feature-desc">Connect Jellyfin, Emby and Plex servers simultaneously. Each appears as a <code>user@server</code> folder with its own library icon.</div>
+        <span class="tag tag-green">Jellyfin</span><span class="tag tag-green">Emby</span><span class="tag tag-yellow">Plex P3</span>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">▶️</div>
+        <div class="feature-title">Stream directly from any app</div>
+        <div class="feature-desc">Open a <code>.mkv</code> in VLC, MPV or any player straight from Explorer. HTTP Range requests enable instant seek without full download.</div>
+        <span class="tag tag-green">Read-only · safe</span>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">⚡</div>
+        <div class="feature-title">Parallel chunk download</div>
+        <div class="feature-desc">Copying a file locally? Media_FS splits it into N chunks downloaded simultaneously via HTTP Range — configurable thread count and chunk size.</div>
+        <span class="tag tag-blue">4 threads default</span>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">📄</div>
+        <div class="feature-title">NFO + artwork sidecars</div>
+        <div class="feature-desc">Every media item ships with a Kodi-compatible <code>.nfo</code> and artwork files (<code>poster.jpg</code>, <code>fanart.jpg</code>) — generated on the fly from the server API.</div>
+        <span class="tag tag-purple">Kodi-compatible</span>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🔧</div>
+        <div class="feature-title">System tray + web config UI</div>
+        <div class="feature-desc">Media_FS lives in the system tray. Click "Configuration" to open a local web UI to add/remove servers, test connections and adjust settings.</div>
+        <span class="tag tag-yellow">No install wizard</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="architecture">
+  <div class="section-inner">
+    <div class="section-title">Architecture</div>
+    <p class="section-sub">A clean Go codebase with a single abstraction layer between the OS VFS interface and each media server connector.</p>
+    <div class="arch-block">
+      <pre>
+  Windows Explorer / Linux Nautilus
+            │ WinFSP · FUSE
+  ┌─────────▼────────────────────────────────┐
+  │             Media_FS Core (Go)           │
+  │                                          │
+  │  ┌─────────────┐   ┌──────────────────┐  │
+  │  │  VFS Layer  │   │  Metadata Cache  │  │
+  │  │  (cgofuse)  │   │  (SQLite · TTL)  │  │
+  │  └──────┬──────┘   └──────────────────┘  │
+  │         │                                │
+  │  ┌──────▼──────────────────────────────┐ │
+  │  │       Connector Interface (Go)       │ │
+  │  ├──────────┬──────────┬───────────────┤ │
+  │  │ Jellyfin │   Emby   │     Plex      │ │
+  │  └──────────┴──────────┴───────────────┘ │
+  │                                          │
+  │  ┌──────────────────────────────────┐    │
+  │  │  HTTP Client · Parallel Chunks   │    │
+  │  └──────────────────────────────────┘    │
+  └──────────────────────────────────────────┘
+            │ HTTPS / REST API
+       Remote Media Servers
+      </pre>
+    </div>
+  </div>
+</section>
+
+<section id="roadmap">
+  <div class="section-inner">
+    <div class="section-title">Roadmap</div>
+    <p class="section-sub">Incremental priorities from core VFS to rich metadata and multi-protocol support.</p>
+    <div class="roadmap-grid">
+      <div class="roadmap-card">
+        <div class="roadmap-header"><span>P0 — Core</span><span class="badge badge-wip">In Progress</span></div>
+        <div class="roadmap-items">
+          <div class="roadmap-item"><span>🔄</span>WinFSP mount (Windows)</div>
+          <div class="roadmap-item"><span>🔄</span>FUSE mount (Linux)</div>
+          <div class="roadmap-item"><span>🔄</span>Browse Jellyfin libraries</div>
+          <div class="roadmap-item"><span>🔄</span>Browse Emby libraries</div>
+          <div class="roadmap-item"><span>🔄</span>HTTP streaming with seek</div>
+          <div class="roadmap-item"><span>🔄</span>Local file copy (parallel)</div>
+          <div class="roadmap-item"><span>🔄</span>System tray + config UI</div>
+        </div>
+      </div>
+      <div class="roadmap-card">
+        <div class="roadmap-header"><span>P1.1 — Metadata</span><span class="badge badge-planned">Planned</span></div>
+        <div class="roadmap-items">
+          <div class="roadmap-item"><span>📋</span>Correct file size &amp; mtime</div>
+          <div class="roadmap-item"><span>📋</span>.nfo sidecar files (Kodi XML)</div>
+          <div class="roadmap-item"><span>📋</span>Artwork: poster, fanart, thumb</div>
+          <div class="roadmap-item"><span>📋</span>Mirror Emby folder structure</div>
+          <div class="roadmap-item"><span>📋</span>SQLite metadata cache</div>
+        </div>
+      </div>
+      <div class="roadmap-card">
+        <div class="roadmap-header"><span>P1.2 — Shell Props</span><span class="badge badge-planned">Planned</span></div>
+        <div class="roadmap-items">
+          <div class="roadmap-item"><span>📋</span>Windows IPropertyStore</div>
+          <div class="roadmap-item"><span>📋</span>Title, year, director in Explorer</div>
+          <div class="roadmap-item"><span>📋</span>Genre as keywords</div>
+          <div class="roadmap-item"><span>📋</span>Rating in Details pane</div>
+          <div class="roadmap-item"><span>📋</span>Filter &amp; sort in Explorer</div>
+        </div>
+      </div>
+      <div class="roadmap-card">
+        <div class="roadmap-header"><span>P3 — Plex</span><span class="badge badge-planned">Planned</span></div>
+        <div class="roadmap-items">
+          <div class="roadmap-item"><span>📋</span>Plex REST connector</div>
+          <div class="roadmap-item"><span>📋</span>X-Plex-Token auth</div>
+          <div class="roadmap-item"><span>📋</span>Plex library sections</div>
+          <div class="roadmap-item"><span>📋</span>Direct stream URL</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="issues">
+  <div class="section-inner">
+    <div class="section-title">Open Issues</div>
+    <p class="section-sub">Live from GitHub — updated on every page load.</p>
+    <div class="issues-list" id="issues-list">
+      <div class="issues-empty" id="issues-loading">Loading issues…</div>
+    </div>
+    <div class="issues-footer">
+      <a href="https://github.com/CCoupel/Media_FS/issues" target="_blank" rel="noopener">View all issues on GitHub →</a>
+    </div>
+  </div>
+</section>
+
+<section id="install">
+  <div class="section-inner">
+    <div class="section-title">Get Started</div>
+    <p class="section-sub">CGO is required — WinFSP or libfuse3 links at compile time.</p>
+    <div class="install-steps">
+      <div class="install-step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+          <h4>Install prerequisites</h4>
+          <p>Windows: install <a href="https://winfsp.dev" target="_blank" rel="noopener">WinFSP</a> + GCC via MinGW &nbsp;|&nbsp; Linux: <code>sudo apt install libfuse3-dev gcc</code></p>
+        </div>
+      </div>
+      <div class="install-step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+          <h4>Clone and build</h4>
+          <div class="code-block">
+            <span class="c"># Clone</span><br>
+            <span class="k">git clone</span> https://github.com/CCoupel/Media_FS.git &amp;&amp; <span class="k">cd</span> Media_FS<br><br>
+            <span class="c"># Build (Windows)</span><br>
+            <span class="k">CGO_ENABLED=1 GOOS=windows go build</span> <span class="f">-o dist/mediafs.exe</span> ./cmd/mediafs<br><br>
+            <span class="c"># Build (Linux)</span><br>
+            <span class="k">CGO_ENABLED=1 go build</span> <span class="f">-o dist/mediafs</span> ./cmd/mediafs
+          </div>
+        </div>
+      </div>
+      <div class="install-step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+          <h4>Configure a server</h4>
+          <p>Launch Media_FS — the tray icon appears. Click <strong>Configuration…</strong> to open the local web UI and add your Jellyfin or Emby server (URL + API key).</p>
+        </div>
+      </div>
+      <div class="install-step">
+        <div class="step-num">4</div>
+        <div class="step-content">
+          <h4>Mount and browse</h4>
+          <p>Click <strong>Mount All</strong> in the tray. Your library appears on drive <code>Z:</code> (Windows) or <code>/mnt/mediafs</code> (Linux). Open a film directly in VLC.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="footer-links">
+    <a href="https://github.com/CCoupel/Media_FS" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://github.com/CCoupel/Media_FS/issues" target="_blank" rel="noopener">Issues</a>
+    <a href="https://github.com/CCoupel/Media_FS/blob/main/SPECS.md" target="_blank" rel="noopener">Specs</a>
+    <a href="https://github.com/CCoupel/Media_FS/blob/main/CLAUDE.md" target="_blank" rel="noopener">CLAUDE.md</a>
+  </div>
+  <p>Media_FS is open-source under the <strong>MIT license</strong> &nbsp;·&nbsp; Built with Go, WinFSP and FUSE &nbsp;·&nbsp;
+     <a href="https://github.com/CCoupel/Media_FS" target="_blank" rel="noopener">CCoupel/Media_FS</a></p>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  const REPO = 'CCoupel/Media_FS';
+  const API  = 'https://api.github.com/repos/' + REPO;
+
+  // Safe text escaping — never use untrusted strings in innerHTML directly
+  function esc(str) {
+    const d = document.createElement('div');
+    d.appendChild(document.createTextNode(String(str)));
+    return d.innerHTML;
+  }
+
+  function timeAgo(dateStr) {
+    const diff = Math.floor((Date.now() - new Date(dateStr)) / 1000);
+    if (diff < 60)    return diff + 's ago';
+    if (diff < 3600)  return Math.floor(diff / 60) + 'm ago';
+    if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+    return Math.floor(diff / 86400) + 'd ago';
+  }
+
+  function setText(id, text) {
+    const el = document.getElementById(id);
+    if (el) { el.textContent = text; el.classList.remove('loading'); }
+  }
+
+  async function apiFetch(path) {
+    try {
+      const r = await fetch(API + path, {
+        headers: { Accept: 'application/vnd.github+json' },
+        signal: AbortSignal.timeout(6000)
+      });
+      return r.ok ? r.json() : null;
+    } catch (_) { return null; }
+  }
+
+  async function loadStats() {
+    const release = await apiFetch('/releases/latest');
+    const tag = (release && release.tag_name) ? release.tag_name : 'pre-release';
+    setText('stat-version', tag);
+    setText('version-badge', tag);
+
+    const commits = await apiFetch('/commits?per_page=1');
+    if (commits && commits[0]) {
+      setText('stat-updated', timeAgo(commits[0].commit.author.date));
+    } else {
+      setText('stat-updated', '—');
+    }
+  }
+
+  async function loadIssues() {
+    const issues = await apiFetch('/issues?state=open&per_page=10');
+    const container = document.getElementById('issues-list');
+    if (!container) return;
+
+    if (!issues) {
+      container.textContent = '';
+      const msg = document.createElement('div');
+      msg.className = 'issues-empty';
+      msg.textContent = 'Unable to load issues (GitHub API rate limit or network error).';
+      container.appendChild(msg);
+      setText('stat-issues', '—');
+      return;
+    }
+
+    setText('stat-issues', issues.length === 10 ? '10+' : String(issues.length));
+    container.textContent = '';
+
+    if (issues.length === 0) {
+      const msg = document.createElement('div');
+      msg.className = 'issues-empty';
+      msg.textContent = '🎉 No open issues right now.';
+      container.appendChild(msg);
+      return;
+    }
+
+    issues.forEach(function (issue) {
+      const row = document.createElement('a');
+      row.className = 'issue-row';
+      row.href = issue.html_url;
+      row.target = '_blank';
+      row.rel = 'noopener';
+
+      const num = document.createElement('span');
+      num.className = 'issue-num';
+      num.textContent = '#' + issue.number;
+
+      const body = document.createElement('div');
+      body.style.flex = '1';
+
+      const title = document.createElement('div');
+      title.className = 'issue-title';
+      title.textContent = issue.title; // textContent — safe
+
+      body.appendChild(title);
+
+      if (issue.labels && issue.labels.length) {
+        const labelRow = document.createElement('div');
+        labelRow.className = 'issue-labels';
+        issue.labels.forEach(function (lbl) {
+          const span = document.createElement('span');
+          span.className = 'issue-label';
+          const hex = lbl.color || '3b82f6';
+          span.style.background = '#' + hex + '22';
+          span.style.borderColor = '#' + hex + '55';
+          span.style.color = '#' + hex;
+          span.textContent = lbl.name; // textContent — safe
+          labelRow.appendChild(span);
+        });
+        body.appendChild(labelRow);
+      }
+
+      const age = document.createElement('span');
+      age.className = 'issue-age';
+      age.textContent = timeAgo(issue.created_at);
+
+      row.appendChild(num);
+      row.appendChild(body);
+      row.appendChild(age);
+      container.appendChild(row);
+    });
+  }
+
+  loadStats();
+  loadIssues();
+})();
+</script>
+</body>
+</html>
