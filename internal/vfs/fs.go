@@ -1,0 +1,359 @@
+package vfs
+
+import (
+	"strings"
+	"sync"
+
+	"github.com/winfsp/cgofuse/fuse"
+
+	"mediafs/internal/cache"
+	"mediafs/internal/connector"
+	"mediafs/internal/downloader"
+)
+
+// MountedServer groups a connector with its server key and cached libraries.
+type MountedServer struct {
+	Key       string // "user@alias"
+	Conn      connector.MediaConnector
+	Libraries []connector.Library
+}
+
+// MediaFS implements fuse.FileSystemInterface.
+// One instance serves all mounted servers under a single mount point.
+type MediaFS struct {
+	fuse.FileSystemBase
+
+	mu       sync.RWMutex
+	servers  map[string]*MountedServer // key → server
+	cache    *cache.Cache
+	dl       *downloader.Downloader
+
+	// open file handles: handle → streamURL + current offset
+	handles map[uint64]*fileHandle
+	nextFH  uint64
+	handlesMu sync.Mutex
+}
+
+type fileHandle struct {
+	streamURL string
+	fileSize  int64
+	serverKey string
+}
+
+// New creates a MediaFS instance.
+func New(c *cache.Cache, dl *downloader.Downloader) *MediaFS {
+	return &MediaFS{
+		servers: make(map[string]*MountedServer),
+		cache:   c,
+		dl:      dl,
+		handles: make(map[uint64]*fileHandle),
+	}
+}
+
+// AddServer registers a server under the filesystem.
+func (fs *MediaFS) AddServer(s *MountedServer) {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	fs.servers[s.Key] = s
+}
+
+// RemoveServer unregisters a server.
+func (fs *MediaFS) RemoveServer(key string) {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	delete(fs.servers, key)
+}
+
+// --- fuse.FileSystemInterface ---
+
+func (fs *MediaFS) Getattr(path string, stat *fuse.Stat_t, fh uint64) int {
+	parts := splitPath(path)
+
+	switch len(parts) {
+	case 0: // root "/"
+		stat.Mode = fuse.S_IFDIR | 0555
+		return 0
+	case 1: // "user@server" folder
+		fs.mu.RLock()
+		_, ok := fs.servers[parts[0]]
+		fs.mu.RUnlock()
+		if !ok {
+			return -fuse.ENOENT
+		}
+		stat.Mode = fuse.S_IFDIR | 0555
+		return 0
+	}
+
+	// Deeper paths: resolve via connector
+	item, err := fs.resolveItem(parts)
+	if err != nil {
+		return -fuse.ENOENT
+	}
+	if item == nil {
+		return -fuse.ENOENT
+	}
+
+	if item.IsFolder {
+		stat.Mode = fuse.S_IFDIR | 0555
+	} else {
+		stat.Mode = fuse.S_IFREG | 0444
+		stat.Size = item.FileSize
+	}
+	return 0
+}
+
+func (fs *MediaFS) Readdir(path string,
+	fill func(name string, stat *fuse.Stat_t, ofst int64) bool,
+	ofst int64, fh uint64) int {
+
+	fill(".", nil, 0)
+	fill("..", nil, 0)
+
+	parts := splitPath(path)
+
+	if len(parts) == 0 {
+		// Root: list all server keys
+		fs.mu.RLock()
+		defer fs.mu.RUnlock()
+		for key := range fs.servers {
+			fill(key, &fuse.Stat_t{Mode: fuse.S_IFDIR | 0555}, 0)
+		}
+		return 0
+	}
+
+	if len(parts) == 1 {
+		// List libraries for this server
+		fs.mu.RLock()
+		srv, ok := fs.servers[parts[0]]
+		fs.mu.RUnlock()
+		if !ok {
+			return -fuse.ENOENT
+		}
+		for _, lib := range srv.Libraries {
+			fill(lib.Name, &fuse.Stat_t{Mode: fuse.S_IFDIR | 0555}, 0)
+		}
+		return 0
+	}
+
+	// List items under a library/folder
+	items, err := fs.listItems(parts)
+	if err != nil {
+		return -fuse.EIO
+	}
+	for _, it := range items {
+		st := &fuse.Stat_t{}
+		if it.IsFolder {
+			st.Mode = fuse.S_IFDIR | 0555
+		} else {
+			st.Mode = fuse.S_IFREG | 0444
+			st.Size = it.FileSize
+		}
+		fill(it.Name, st, 0)
+
+		// Inject virtual sidecar files for media items
+		if !it.IsFolder {
+			nfoName := strings.TrimSuffix(it.Name, extensionOf(it.Name)) + ".nfo"
+			fill(nfoName, &fuse.Stat_t{Mode: fuse.S_IFREG | 0444, Size: 1024}, 0)
+		}
+	}
+	return 0
+}
+
+func (fs *MediaFS) Open(path string, flags int) (int, uint64) {
+	if flags&fuse.O_RDWR != 0 || flags&fuse.O_WRONLY != 0 {
+		return -fuse.EPERM, ^uint64(0)
+	}
+
+	parts := splitPath(path)
+	if len(parts) < 2 {
+		return -fuse.ENOENT, ^uint64(0)
+	}
+
+	item, err := fs.resolveItem(parts)
+	if err != nil || item == nil || item.IsFolder {
+		return -fuse.ENOENT, ^uint64(0)
+	}
+
+	srv := fs.serverForKey(parts[0])
+	if srv == nil {
+		return -fuse.ENOENT, ^uint64(0)
+	}
+
+	streamURL, err := srv.Conn.GetStreamURL(item.ID)
+	if err != nil {
+		return -fuse.EIO, ^uint64(0)
+	}
+
+	fs.handlesMu.Lock()
+	fh := fs.nextFH
+	fs.nextFH++
+	fs.handles[fh] = &fileHandle{
+		streamURL: streamURL,
+		fileSize:  item.FileSize,
+		serverKey: parts[0],
+	}
+	fs.handlesMu.Unlock()
+
+	return 0, fh
+}
+
+func (fs *MediaFS) Read(path string, buf []byte, ofst int64, fh uint64) int {
+	fs.handlesMu.Lock()
+	h, ok := fs.handles[fh]
+	fs.handlesMu.Unlock()
+	if !ok {
+		return -fuse.EBADF
+	}
+
+	length := int64(len(buf))
+	if ofst+length > h.fileSize {
+		length = h.fileSize - ofst
+	}
+	if length <= 0 {
+		return 0
+	}
+
+	data, err := fs.dl.ReadAt(h.streamURL, nil, ofst, length)
+	if err != nil {
+		return -fuse.EIO
+	}
+
+	n := copy(buf, data)
+	return n
+}
+
+func (fs *MediaFS) Release(path string, fh uint64) int {
+	fs.handlesMu.Lock()
+	delete(fs.handles, fh)
+	fs.handlesMu.Unlock()
+	return 0
+}
+
+// Write operations are rejected — read-only filesystem.
+func (fs *MediaFS) Write(path string, buf []byte, ofst int64, fh uint64) int { return -fuse.EPERM }
+func (fs *MediaFS) Create(path string, flags int, mode uint32) (int, uint64)  { return -fuse.EPERM, 0 }
+func (fs *MediaFS) Mkdir(path string, mode uint32) int                        { return -fuse.EPERM }
+func (fs *MediaFS) Unlink(path string) int                                    { return -fuse.EPERM }
+func (fs *MediaFS) Rename(oldpath, newpath string) int                        { return -fuse.EPERM }
+
+// --- helpers ---
+
+func splitPath(path string) []string {
+	path = strings.TrimPrefix(path, "/")
+	if path == "" {
+		return nil
+	}
+	return strings.Split(path, "/")
+}
+
+func extensionOf(name string) string {
+	for i := len(name) - 1; i >= 0; i-- {
+		if name[i] == '.' {
+			return name[i:]
+		}
+	}
+	return ""
+}
+
+func (fs *MediaFS) serverForKey(key string) *MountedServer {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+	return fs.servers[key]
+}
+
+func (fs *MediaFS) resolveItem(parts []string) (*connector.MediaItem, error) {
+	// parts[0]=serverKey, parts[1]=libraryName, parts[2..n]=path within library
+	srv := fs.serverForKey(parts[0])
+	if srv == nil {
+		return nil, nil
+	}
+
+	// Find library by name
+	var lib *connector.Library
+	for i := range srv.Libraries {
+		if srv.Libraries[i].Name == parts[1] {
+			lib = &srv.Libraries[i]
+			break
+		}
+	}
+	if lib == nil {
+		return nil, nil
+	}
+
+	// Walk down the path
+	parentID := ""
+	var found *connector.MediaItem
+	for depth := 2; depth <= len(parts); depth++ {
+		items, err := fs.listItemsCached(parts[0], lib.ID, parentID)
+		if err != nil {
+			return nil, err
+		}
+		var next *connector.MediaItem
+		for i := range items {
+			if items[i].Name == parts[depth-1] {
+				next = &items[i]
+				break
+			}
+		}
+		if next == nil {
+			return nil, nil
+		}
+		found = next
+		parentID = next.ID
+	}
+	return found, nil
+}
+
+func (fs *MediaFS) listItems(parts []string) ([]connector.MediaItem, error) {
+	srv := fs.serverForKey(parts[0])
+	if srv == nil {
+		return nil, nil
+	}
+
+	var lib *connector.Library
+	for i := range srv.Libraries {
+		if srv.Libraries[i].Name == parts[1] {
+			lib = &srv.Libraries[i]
+			break
+		}
+	}
+	if lib == nil {
+		return nil, nil
+	}
+
+	parentID := ""
+	if len(parts) > 2 {
+		parent, err := fs.resolveItem(parts[:len(parts)])
+		if err != nil || parent == nil {
+			return nil, err
+		}
+		parentID = parent.ID
+	}
+
+	return fs.listItemsCached(parts[0], lib.ID, parentID)
+}
+
+func (fs *MediaFS) listItemsCached(serverKey, libID, parentID string) ([]connector.MediaItem, error) {
+	cacheKey := parentID
+	if cacheKey == "" {
+		cacheKey = libID
+	}
+
+	var items []connector.MediaItem
+	if ok, err := fs.cache.GetItems(serverKey, cacheKey, &items); ok {
+		return items, err
+	}
+
+	srv := fs.serverForKey(serverKey)
+	if srv == nil {
+		return nil, nil
+	}
+
+	items, err := srv.Conn.GetItems(libID, parentID)
+	if err != nil {
+		return nil, err
+	}
+
+	_ = fs.cache.StoreItems(serverKey, cacheKey, items)
+	return items, nil
+}
