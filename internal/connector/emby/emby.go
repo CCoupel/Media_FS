@@ -5,9 +5,9 @@
 package emby
 
 import (
-	"mediafs/internal/config"
-	"mediafs/internal/connector"
-	jf "mediafs/internal/connector/jellyfin"
+	"github.com/CCoupel/Media_FS/internal/config"
+	"github.com/CCoupel/Media_FS/internal/connector"
+	jf "github.com/CCoupel/Media_FS/internal/connector/jellyfin"
 )
 
 func init() {

@@ -1,4 +1,4 @@
-module mediafs
+module github.com/CCoupel/Media_FS
 
 go 1.25.5
 

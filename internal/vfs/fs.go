@@ -6,9 +6,9 @@ import (
 
 	"github.com/winfsp/cgofuse/fuse"
 
-	"mediafs/internal/cache"
-	"mediafs/internal/connector"
-	"mediafs/internal/downloader"
+	"github.com/CCoupel/Media_FS/internal/cache"
+	"github.com/CCoupel/Media_FS/internal/connector"
+	"github.com/CCoupel/Media_FS/internal/downloader"
 )
 
 // MountedServer groups a connector with its server key and cached libraries.

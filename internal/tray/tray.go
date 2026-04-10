@@ -5,7 +5,7 @@ import (
 
 	"fyne.io/systray"
 
-	"mediafs/internal/config"
+	"github.com/CCoupel/Media_FS/internal/config"
 )
 
 // ServerStatus represents the current state of a mounted server.

@@ -10,7 +10,7 @@ import (
 	"net"
 	"net/http"
 
-	"mediafs/internal/config"
+	"github.com/CCoupel/Media_FS/internal/config"
 )
 
 //go:embed templates/*

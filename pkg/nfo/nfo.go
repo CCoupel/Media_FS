@@ -5,7 +5,7 @@ import (
 	"encoding/xml"
 	"fmt"
 
-	"mediafs/internal/connector"
+	"github.com/CCoupel/Media_FS/internal/connector"
 )
 
 // Movie generates a movie.nfo XML payload.

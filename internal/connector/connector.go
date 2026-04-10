@@ -1,6 +1,6 @@
 package connector
 
-import "mediafs/internal/config"
+import "github.com/CCoupel/Media_FS/internal/config"
 
 // ArtworkType represents the type of artwork to retrieve.
 type ArtworkType string

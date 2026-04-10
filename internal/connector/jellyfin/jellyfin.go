@@ -8,8 +8,8 @@ import (
 	"net/url"
 	"time"
 
-	"mediafs/internal/config"
-	"mediafs/internal/connector"
+	"github.com/CCoupel/Media_FS/internal/config"
+	"github.com/CCoupel/Media_FS/internal/connector"
 )
 
 func init() {
