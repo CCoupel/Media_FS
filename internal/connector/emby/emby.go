@@ -22,10 +22,8 @@ type Client struct {
 }
 
 func (c *Client) Connect(cfg config.ServerConfig) error {
-	if err := c.Client.Connect(cfg); err != nil {
-		return err
-	}
-	// Emby uses X-Emby-Token instead of X-MediaBrowser-Token
+	// Set the Emby header BEFORE Connect so all internal API calls
+	// (e.g. GET /Users) already use X-Emby-Token.
 	c.Client.SetAuthHeader("X-Emby-Token")
-	return nil
+	return c.Client.Connect(cfg)
 }

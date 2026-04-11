@@ -2,6 +2,9 @@ package vfs
 
 import (
 	"fmt"
+	"io"
+	"log"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -75,7 +78,7 @@ func (fs *MediaFS) Getattr(path string, stat *fuse.Stat_t, fh uint64) int {
 
 	switch len(parts) {
 	case 0: // root "/"
-		stat.Mode = fuse.S_IFDIR | 0555
+		dirStat(stat)
 		return 0
 	case 1: // "user@server" folder
 		fs.mu.RLock()
@@ -84,8 +87,22 @@ func (fs *MediaFS) Getattr(path string, stat *fuse.Stat_t, fh uint64) int {
 		if !ok {
 			return -fuse.ENOENT
 		}
-		stat.Mode = fuse.S_IFDIR | 0555
+		dirStat(stat)
 		return 0
+	case 2: // "user@server/LibraryName" folder
+		fs.mu.RLock()
+		srv, ok := fs.servers[parts[0]]
+		fs.mu.RUnlock()
+		if !ok {
+			return -fuse.ENOENT
+		}
+		for _, lib := range srv.Libraries {
+			if lib.Name == parts[1] {
+				dirStat(stat)
+				return 0
+			}
+		}
+		return -fuse.ENOENT
 	}
 
 	// Virtual .nfo sidecar: check before general resolution
@@ -99,6 +116,21 @@ func (fs *MediaFS) Getattr(path string, stat *fuse.Stat_t, fh uint64) int {
 		return 0
 	}
 
+	// Virtual artwork sidecar
+	if _, _, ok := splitArtworkName(parts[len(parts)-1]); ok {
+		item, artType, err := fs.resolveArtworkItem(parts)
+		if err != nil || item == nil {
+			return -fuse.ENOENT
+		}
+		stat.Mode = fuse.S_IFREG | 0444
+		if data, ok, _ := fs.cache.GetArtwork(parts[0], item.ID, string(artType)); ok {
+			stat.Size = int64(len(data))
+		} else {
+			stat.Size = 51200 // 50 KB estimate before first fetch
+		}
+		return 0
+	}
+
 	// Deeper paths: resolve via connector
 	item, err := fs.resolveItem(parts)
 	if err != nil {
@@ -109,7 +141,7 @@ func (fs *MediaFS) Getattr(path string, stat *fuse.Stat_t, fh uint64) int {
 	}
 
 	if item.IsFolder {
-		stat.Mode = fuse.S_IFDIR | 0555
+		dirStat(stat)
 	} else {
 		stat.Mode = fuse.S_IFREG | 0444
 		stat.Size = item.FileSize
@@ -131,13 +163,15 @@ func (fs *MediaFS) Readdir(path string,
 	fill("..", nil, 0)
 
 	parts := splitPath(path)
+	log.Printf("[vfs] Readdir %q (depth=%d)", path, len(parts))
 
 	if len(parts) == 0 {
 		// Root: list all server keys
 		fs.mu.RLock()
 		defer fs.mu.RUnlock()
+		log.Printf("[vfs] root: %d servers", len(fs.servers))
 		for key := range fs.servers {
-			fill(key, &fuse.Stat_t{Mode: fuse.S_IFDIR | 0555}, 0)
+			fill(key, &fuse.Stat_t{Mode: fuse.S_IFDIR | 0555, Nlink: 2}, 0)
 		}
 		return 0
 	}
@@ -148,10 +182,12 @@ func (fs *MediaFS) Readdir(path string,
 		srv, ok := fs.servers[parts[0]]
 		fs.mu.RUnlock()
 		if !ok {
+			log.Printf("[vfs] server %q not found", parts[0])
 			return -fuse.ENOENT
 		}
+		log.Printf("[vfs] server %q: %d libraries", parts[0], len(srv.Libraries))
 		for _, lib := range srv.Libraries {
-			fill(lib.Name, &fuse.Stat_t{Mode: fuse.S_IFDIR | 0555}, 0)
+			fill(lib.Name, &fuse.Stat_t{Mode: fuse.S_IFDIR | 0555, Nlink: 2}, 0)
 		}
 		return 0
 	}
@@ -159,22 +195,28 @@ func (fs *MediaFS) Readdir(path string,
 	// List items under a library/folder
 	items, err := fs.listItems(parts)
 	if err != nil {
+		log.Printf("[vfs] listItems %q error: %v", path, err)
 		return -fuse.EIO
 	}
+	log.Printf("[vfs] listItems %q → %d items", path, len(items))
 	for _, it := range items {
 		st := &fuse.Stat_t{}
 		if it.IsFolder {
 			st.Mode = fuse.S_IFDIR | 0555
+			st.Nlink = 2
 		} else {
 			st.Mode = fuse.S_IFREG | 0444
 			st.Size = it.FileSize
 		}
 		fill(it.Name, st, 0)
 
-		// Inject virtual sidecar files for media items
+		// Inject virtual sidecar files (.nfo + artwork)
+		base := strings.TrimSuffix(it.Name, extensionOf(it.Name))
 		if !it.IsFolder {
-			nfoName := strings.TrimSuffix(it.Name, extensionOf(it.Name)) + ".nfo"
-			fill(nfoName, &fuse.Stat_t{Mode: fuse.S_IFREG | 0444, Size: 1024}, 0)
+			fill(base+".nfo", &fuse.Stat_t{Mode: fuse.S_IFREG | 0444, Size: 1024}, 0)
+		}
+		for _, artFile := range connector.ArtworkFilenames(it.Type) {
+			fill(base+"-"+artFile, &fuse.Stat_t{Mode: fuse.S_IFREG | 0444, Size: 51200}, 0)
 		}
 	}
 	return 0
@@ -188,6 +230,30 @@ func (fs *MediaFS) Open(path string, flags int) (int, uint64) {
 	parts := splitPath(path)
 	if len(parts) < 2 {
 		return -fuse.ENOENT, ^uint64(0)
+	}
+
+	// Virtual artwork sidecar
+	if _, _, ok := splitArtworkName(parts[len(parts)-1]); ok {
+		item, artType, err := fs.resolveArtworkItem(parts)
+		if err != nil || item == nil {
+			return -fuse.ENOENT, ^uint64(0)
+		}
+		data, err := fs.fetchArtwork(parts[0], item, artType)
+		if err != nil {
+			return -fuse.EIO, ^uint64(0)
+		}
+		if data == nil {
+			return -fuse.ENOENT, ^uint64(0) // 404 from server
+		}
+		fs.handlesMu.Lock()
+		fh := fs.nextFH
+		fs.nextFH++
+		fs.handles[fh] = &fileHandle{
+			nfoContent: data,
+			fileSize:   int64(len(data)),
+		}
+		fs.handlesMu.Unlock()
+		return 0, fh
 	}
 
 	// Virtual .nfo sidecar
@@ -287,6 +353,13 @@ func (fs *MediaFS) Rename(oldpath, newpath string) int                        { 
 
 // --- helpers ---
 
+// dirStat fills stat as a read-only directory.
+// Nlink=2 tells Windows Explorer the folder may have children (shows expand arrow).
+func dirStat(stat *fuse.Stat_t) {
+	stat.Mode = fuse.S_IFDIR | 0555
+	stat.Nlink = 2
+}
+
 func splitPath(path string) []string {
 	path = strings.TrimPrefix(path, "/")
 	if path == "" {
@@ -329,18 +402,18 @@ func (fs *MediaFS) resolveItem(parts []string) (*connector.MediaItem, error) {
 		return nil, nil
 	}
 
-	// Walk down the path
+	// Walk down the path: parts[2], parts[3], …
 	parentID := ""
 	var found *connector.MediaItem
-	for depth := 2; depth <= len(parts); depth++ {
+	for i := 2; i < len(parts); i++ {
 		items, err := fs.listItemsCached(parts[0], lib.ID, parentID)
 		if err != nil {
 			return nil, err
 		}
 		var next *connector.MediaItem
-		for i := range items {
-			if items[i].Name == parts[depth-1] {
-				next = &items[i]
+		for j := range items {
+			if items[j].Name == parts[i] {
+				next = &items[j]
 				break
 			}
 		}
@@ -380,6 +453,84 @@ func (fs *MediaFS) listItems(parts []string) ([]connector.MediaItem, error) {
 	}
 
 	return fs.listItemsCached(parts[0], lib.ID, parentID)
+}
+
+// splitArtworkName parses a virtual artwork filename, e.g. "Inception-poster.jpg"
+// → ("Inception", "poster.jpg", true). Returns ok=false for non-artwork names.
+func splitArtworkName(name string) (base, artFile string, ok bool) {
+	for _, af := range []string{"poster.jpg", "fanart.jpg", "banner.jpg", "thumb.jpg", "folder.jpg"} {
+		suffix := "-" + af
+		if strings.HasSuffix(name, suffix) {
+			return strings.TrimSuffix(name, suffix), af, true
+		}
+	}
+	return "", "", false
+}
+
+// resolveArtworkItem finds the media item and ArtworkType for a virtual artwork path.
+func (fs *MediaFS) resolveArtworkItem(parts []string) (*connector.MediaItem, connector.ArtworkType, error) {
+	itemBase, artFile, ok := splitArtworkName(parts[len(parts)-1])
+	if !ok {
+		return nil, "", nil
+	}
+	artType, ok := connector.ArtworkTypeForFilename(artFile)
+	if !ok {
+		return nil, "", nil
+	}
+	parentParts := parts[:len(parts)-1]
+	if len(parentParts) < 2 {
+		return nil, "", nil
+	}
+	items, err := fs.listItems(parentParts)
+	if err != nil {
+		return nil, "", err
+	}
+	for i := range items {
+		base := strings.TrimSuffix(items[i].Name, extensionOf(items[i].Name))
+		if base == itemBase {
+			return &items[i], artType, nil
+		}
+	}
+	return nil, "", nil
+}
+
+// fetchArtwork returns artwork bytes from cache or fetches from the server.
+// Returns nil data (no error) when the server responds 404.
+func (fs *MediaFS) fetchArtwork(serverKey string, item *connector.MediaItem, artType connector.ArtworkType) ([]byte, error) {
+	cacheKey := string(artType)
+
+	if data, ok, _ := fs.cache.GetArtwork(serverKey, item.ID, cacheKey); ok {
+		return data, nil
+	}
+
+	srv := fs.serverForKey(serverKey)
+	if srv == nil {
+		return nil, fmt.Errorf("server %q not found", serverKey)
+	}
+	artURL, err := srv.Conn.GetArtworkURL(item.ID, artType)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := fs.dl.HTTPClient.Get(artURL)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, nil // silently treat 404 as absent
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("artwork %s HTTP %d", artURL, resp.StatusCode)
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	_ = fs.cache.StoreArtwork(serverKey, item.ID, cacheKey, data)
+	return data, nil
 }
 
 // resolveNFOItem finds the media item whose base name matches a .nfo path.
@@ -438,18 +589,23 @@ func (fs *MediaFS) listItemsCached(serverKey, libID, parentID string) ([]connect
 
 	var items []connector.MediaItem
 	if ok, err := fs.cache.GetItems(serverKey, cacheKey, &items); ok {
+		log.Printf("[vfs] cache hit: server=%s lib=%s parent=%s → %d items", serverKey, libID, parentID, len(items))
 		return items, err
 	}
 
 	srv := fs.serverForKey(serverKey)
 	if srv == nil {
+		log.Printf("[vfs] listItemsCached: server %q not found", serverKey)
 		return nil, nil
 	}
 
+	log.Printf("[vfs] fetching items: server=%s lib=%s parent=%s", serverKey, libID, parentID)
 	items, err := srv.Conn.GetItems(libID, parentID)
 	if err != nil {
+		log.Printf("[vfs] GetItems error: server=%s lib=%s parent=%s: %v", serverKey, libID, parentID, err)
 		return nil, err
 	}
+	log.Printf("[vfs] GetItems: server=%s lib=%s parent=%s → %d items", serverKey, libID, parentID, len(items))
 
 	_ = fs.cache.StoreItems(serverKey, cacheKey, items)
 	return items, nil

@@ -21,8 +21,10 @@ Full functional specs: [SPECS.md](SPECS.md)
 CGO is required (cgofuse links against WinFSP / libfuse).
 
 ```bash
-# Windows (requires WinFSP installed + gcc via mingw)
-CGO_ENABLED=1 GOOS=windows go build -o dist/mediafs.exe ./cmd/mediafs
+# Windows — prérequis : WinFSP (C:\Program Files (x86)\WinFsp) + MinGW-w64 (C:\mingw64)
+PATH="/c/mingw64/bin:$PATH" CGO_ENABLED=1 GOOS=windows \
+  CGO_CFLAGS="-IC:/PROGRA~2/WinFsp/inc/fuse" \
+  go build -o dist/mediafs.exe ./cmd/mediafs
 
 # Linux (requires libfuse3-dev)
 CGO_ENABLED=1 GOOS=linux go build -o dist/mediafs ./cmd/mediafs

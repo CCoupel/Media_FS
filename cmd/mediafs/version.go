@@ -7,4 +7,4 @@ package main
 //   - patch (0.0.x) : bug fix, minor improvement
 //   - minor (0.x.0) : new feature / issue
 //   - major (x.0.0) : breaking change
-const Version = "v0.1.0"
+const Version = "v0.2.0"

@@ -1,7 +1,12 @@
 package tray
 
 import (
+	"bytes"
+	"encoding/binary"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
 
 	"fyne.io/systray"
 
@@ -146,17 +151,43 @@ func serverLabel(key string, mounted bool, errMsg string) string {
 	return fmt.Sprintf("%s %s", indicator, key)
 }
 
-// setIcon sets the tray icon from embedded bytes.
-// Actual icon bytes are embedded via //go:embed in a separate _icon.go file.
+// setIcon sets the tray icon.
+// Generates a minimal 16×16 PNG at runtime until real assets are embedded (issue #16).
 func setIcon(fn func([]byte)) {
-	// Placeholder — real icon loaded from assets/tray/icon.ico at build time
-	fn(defaultIconBytes)
+	fn(generateDefaultIcon())
 }
 
-// defaultIconBytes is a 1×1 transparent ICO as fallback.
-// Replace with //go:embed assets/tray/icon.ico once assets are added.
-var defaultIconBytes = []byte{
-	0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x01, 0x01,
-	0x00, 0x00, 0x01, 0x00, 0x18, 0x00, 0x28, 0x00,
-	0x00, 0x00, 0x16, 0x00, 0x00, 0x00,
+func generateDefaultIcon() []byte {
+	img := image.NewRGBA(image.Rect(0, 0, 16, 16))
+	col := color.RGBA{R: 99, G: 102, B: 241, A: 255} // indigo — placeholder until #16
+	for y := 0; y < 16; y++ {
+		for x := 0; x < 16; x++ {
+			img.Set(x, y, col)
+		}
+	}
+	var pngBuf bytes.Buffer
+	_ = png.Encode(&pngBuf, img)
+	return wrapInICO(pngBuf.Bytes(), 16)
+}
+
+// wrapInICO wraps PNG bytes into a minimal ICO container (Vista+ PNG-in-ICO format).
+// fyne.io/systray on Windows requires ICO format; PNG embedded in ICO is supported
+// on Windows Vista and later via CreateIconFromResourceEx.
+func wrapInICO(pngData []byte, size int) []byte {
+	buf := make([]byte, 22+len(pngData))
+	// ICO header
+	binary.LittleEndian.PutUint16(buf[0:], 0) // reserved
+	binary.LittleEndian.PutUint16(buf[2:], 1) // type = 1 (ICO)
+	binary.LittleEndian.PutUint16(buf[4:], 1) // count = 1 image
+	// Directory entry
+	buf[6] = byte(size) // width
+	buf[7] = byte(size) // height
+	buf[8] = 0          // color count (0 = no palette)
+	buf[9] = 0          // reserved
+	binary.LittleEndian.PutUint16(buf[10:], 1)                    // planes
+	binary.LittleEndian.PutUint16(buf[12:], 32)                   // bit count
+	binary.LittleEndian.PutUint32(buf[14:], uint32(len(pngData))) // image data size
+	binary.LittleEndian.PutUint32(buf[18:], 22)                   // image data offset
+	copy(buf[22:], pngData)
+	return buf
 }

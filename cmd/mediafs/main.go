@@ -76,7 +76,7 @@ func runTray() {
 		OnRefresh:    func(key string) { cacheInst.Invalidate(key) },
 		OnOpenConfig: func() {
 			if webSrv != nil {
-				openBrowser(webSrv.URL())
+				openConfigPopup(webSrv.URL())
 			}
 		},
 		OnQuit: func() { os.Exit(0) },
@@ -130,22 +130,34 @@ func connectServer(cfg *config.Config, key string, fs *vfs.MediaFS) error {
 	if srvCfg == nil {
 		return fmt.Errorf("server %q not found in config", key)
 	}
+	log.Printf("[mount] connecting %s (%s @ %s)", key, srvCfg.Type, srvCfg.URL)
+
 	conn := connector.New(srvCfg.Type)
 	if conn == nil {
 		return fmt.Errorf("unknown connector type %q", srvCfg.Type)
 	}
 	if err := conn.Connect(*srvCfg); err != nil {
+		log.Printf("[mount] connect error for %s: %v", key, err)
 		return err
 	}
+	log.Printf("[mount] authenticated as %s", key)
+
 	libs, err := conn.GetLibraries()
 	if err != nil {
+		log.Printf("[mount] GetLibraries error for %s: %v", key, err)
 		return err
 	}
+	log.Printf("[mount] %s: %d libraries found", key, len(libs))
+	for _, l := range libs {
+		log.Printf("[mount]   lib: %q (id=%s type=%s)", l.Name, l.ID, l.Type)
+	}
+
 	fs.AddServer(&vfs.MountedServer{
 		Key:       key,
 		Conn:      conn,
 		Libraries: libs,
 	})
+	log.Printf("[mount] %s registered in VFS", key)
 	return nil
 }
 
@@ -308,4 +320,28 @@ func openBrowser(url string) {
 		cmd = exec.Command("xdg-open", url)
 	}
 	_ = cmd.Start()
+}
+
+// openConfigPopup opens the config UI as a minimal popup window using Edge app mode.
+// Falls back to the system browser if Edge is not found.
+func openConfigPopup(url string) {
+	if runtime.GOOS == "windows" {
+		edgePaths := []string{
+			`C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`,
+			`C:\Program Files\Microsoft\Edge\Application\msedge.exe`,
+		}
+		for _, path := range edgePaths {
+			if _, err := os.Stat(path); err == nil {
+				cmd := exec.Command(path,
+					"--app="+url,
+					"--window-size=980,760",
+					"--window-position=80,60",
+				)
+				if cmd.Start() == nil {
+					return
+				}
+			}
+		}
+	}
+	openBrowser(url)
 }

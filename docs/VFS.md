@@ -39,10 +39,22 @@ Path-to-itemID resolution is cached. On cache miss, walk the tree from the neare
 Files not present in the server's item list but synthesized by Media_FS:
 
 - `*.nfo` — inserted alongside every media item, generated via `pkg/nfo`
-- `poster.jpg`, `fanart.jpg`, `folder.jpg`, `*-thumb.jpg` — artwork, fetched once and cached as SQLite blobs
+- `{name}-poster.jpg`, `{name}-fanart.jpg`, … — artwork, fetched once and cached as SQLite blobs
 - `desktop.ini` — injected at the `user@server` level to set the folder icon (Windows only)
 
-These files have `isVirtual = true` in the path cache and are served from the cache layer, not the connector.
+Artwork virtual filenames are prefixed with the item base name to avoid collisions within a flat library folder (e.g. `Inception-poster.jpg` next to `Inception.mkv`).
+
+### Artwork naming table
+
+| Item type | Virtual files injected |
+|---|---|
+| `Movie` | `{name}-poster.jpg`, `{name}-fanart.jpg` |
+| `Series` | `{name}-poster.jpg`, `{name}-fanart.jpg`, `{name}-banner.jpg` |
+| `Season` | `{name}-poster.jpg` |
+| `Episode` | `{name}-thumb.jpg` |
+| `MusicAlbum` | `{name}-folder.jpg`, `{name}-fanart.jpg` |
+
+`{name}` = item name without file extension. Artwork is served from `cache.GetArtwork` (SQLite blob, TTL 24 h); on miss, fetched via `connector.GetArtworkURL` and stored. A 404 from the server returns `ENOENT` silently.
 
 ## Mount points
 

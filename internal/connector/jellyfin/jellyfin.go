@@ -1,11 +1,14 @@
 package jellyfin
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/CCoupel/Media_FS/internal/config"
@@ -35,15 +38,32 @@ func (c *Client) SetAuthHeader(header string) {
 
 func (c *Client) Connect(cfg config.ServerConfig) error {
 	c.baseURL = cfg.URL
-	c.apiKey = cfg.APIKey
-	c.authHeader = "X-MediaBrowser-Token"
+	if c.authHeader == "" {
+		c.authHeader = "X-MediaBrowser-Token" // Emby overrides this before calling Connect
+	}
 	c.http = &http.Client{Timeout: 15 * time.Second}
 
-	userID, err := c.resolveUserID(cfg.Username)
-	if err != nil {
-		return fmt.Errorf("jellyfin connect: %w", err)
+	if cfg.APIKey != "" {
+		log.Printf("[jellyfin] connecting %s via API key, username=%q", cfg.URL, cfg.Username)
+		c.apiKey = cfg.APIKey
+		userID, err := c.resolveUserID(cfg.Username)
+		if err != nil {
+			return fmt.Errorf("jellyfin connect: %w", err)
+		}
+		c.userID = userID
+		log.Printf("[jellyfin] API key auth OK, userID=%s", userID)
+	} else if cfg.Password != "" {
+		log.Printf("[jellyfin] connecting %s via password for user %q", cfg.URL, cfg.Username)
+		token, userID, err := c.authenticateByPassword(cfg.Username, cfg.Password)
+		if err != nil {
+			return fmt.Errorf("jellyfin connect: %w", err)
+		}
+		c.apiKey = token
+		c.userID = userID
+		log.Printf("[jellyfin] password auth OK, userID=%s", userID)
+	} else {
+		return fmt.Errorf("jellyfin connect: no api_key or password provided")
 	}
-	c.userID = userID
 	return nil
 }
 
@@ -81,6 +101,7 @@ func (c *Client) GetLibraries() ([]connector.Library, error) {
 			Name: item.Name,
 			Type: collectionTypeToItemType(item.CollectionType),
 		}
+		log.Printf("[jellyfin] library %d: %q (id=%s collectionType=%s)", i, item.Name, item.ID, item.CollectionType)
 	}
 	return libs, nil
 }
@@ -223,15 +244,23 @@ func (c *Client) GetFileSize(itemID string) (int64, error) {
 // --- internal helpers ---
 
 func (c *Client) get(path string, params url.Values) (*http.Response, error) {
-	u := c.baseURL + path
-	if params != nil {
-		u += "?" + params.Encode()
+	if params == nil {
+		params = url.Values{}
 	}
+	// api_key query param: universally supported by Emby and Jellyfin
+	params.Set("api_key", c.apiKey)
+	u := c.baseURL + path + "?" + params.Encode()
+
 	req, err := http.NewRequest("GET", u, nil)
 	if err != nil {
 		return nil, err
 	}
+	// Set both header styles for maximum compatibility
 	req.Header.Set(c.authHeader, c.apiKey)
+	req.Header.Set("Authorization",
+		fmt.Sprintf(`MediaBrowser Client="MediaFS", Device="MediaFS", DeviceId="mediafs-cli", Version="1.0", Token="%s"`, c.apiKey))
+
+	log.Printf("[http] GET %s (auth header: %s)", path, c.authHeader)
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -240,15 +269,55 @@ func (c *Client) get(path string, params url.Values) (*http.Response, error) {
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		return nil, fmt.Errorf("jellyfin %s → %d: %s", path, resp.StatusCode, body)
+		log.Printf("[http] GET %s → %d: %s", path, resp.StatusCode, body)
+		return nil, fmt.Errorf("%s → HTTP %d: %s", path, resp.StatusCode, body)
 	}
 	return resp, nil
 }
 
+// authenticateByPassword calls POST /Users/AuthenticateByName and returns (token, userID).
+func (c *Client) authenticateByPassword(username, password string) (string, string, error) {
+	body, _ := json.Marshal(map[string]string{"Username": username, "Pw": password})
+	req, err := http.NewRequest("POST", c.baseURL+"/Users/AuthenticateByName", bytes.NewReader(body))
+	if err != nil {
+		return "", "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Emby-Authorization",
+		`MediaBrowser Client="MediaFS", Device="MediaFS", DeviceId="mediafs-cli", Version="1.0"`)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		b, _ := io.ReadAll(resp.Body)
+		return "", "", fmt.Errorf("auth failed (%d): %s", resp.StatusCode, b)
+	}
+
+	var result struct {
+		AccessToken string `json:"AccessToken"`
+		User        struct {
+			ID string `json:"Id"`
+		} `json:"User"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", "", err
+	}
+	if result.AccessToken == "" {
+		return "", "", fmt.Errorf("empty access token in response")
+	}
+	return result.AccessToken, result.User.ID, nil
+}
+
+// resolveUserID resolves a username to a Jellyfin user ID using GET /Users.
+// Jellyfin API keys have admin access and can call this endpoint.
+// If username is not found, falls back to the first user in the list.
 func (c *Client) resolveUserID(username string) (string, error) {
 	resp, err := c.get("/Users", nil)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("GET /Users failed (API key must have admin access): %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -259,15 +328,18 @@ func (c *Client) resolveUserID(username string) (string, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&users); err != nil {
 		return "", err
 	}
+	log.Printf("[jellyfin] /Users returned %d users", len(users))
 	for _, u := range users {
-		if u.Name == username {
+		if strings.EqualFold(u.Name, username) {
+			log.Printf("[jellyfin] matched user %q → id=%s", username, u.ID)
 			return u.ID, nil
 		}
 	}
 	if len(users) > 0 {
+		log.Printf("[jellyfin] user %q not found, using first: %s (id=%s)", username, users[0].Name, users[0].ID)
 		return users[0].ID, nil
 	}
-	return "", fmt.Errorf("user %q not found", username)
+	return "", fmt.Errorf("no users found on server")
 }
 
 func collectionTypeToItemType(ct string) connector.ItemType {
