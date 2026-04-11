@@ -120,7 +120,7 @@ CGO_ENABLED=1 \
 ### Linux
 
 ```bash
-sudo apt-get install -y libfuse3-dev gcc
+sudo apt-get install -y libfuse-dev gcc   # fuse2 — cgofuse v1.6.0 uses pkg-config: fuse
 CGO_ENABLED=1 go build -o dist/mediafs ./cmd/mediafs
 ```
 
