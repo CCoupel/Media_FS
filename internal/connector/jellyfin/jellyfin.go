@@ -244,15 +244,23 @@ func (c *Client) GetFileSize(itemID string) (int64, error) {
 // --- internal helpers ---
 
 func (c *Client) get(path string, params url.Values) (*http.Response, error) {
-	u := c.baseURL + path
-	if params != nil {
-		u += "?" + params.Encode()
+	if params == nil {
+		params = url.Values{}
 	}
+	// api_key query param: universally supported by Emby and Jellyfin
+	params.Set("api_key", c.apiKey)
+	u := c.baseURL + path + "?" + params.Encode()
+
 	req, err := http.NewRequest("GET", u, nil)
 	if err != nil {
 		return nil, err
 	}
+	// Set both header styles for maximum compatibility
 	req.Header.Set(c.authHeader, c.apiKey)
+	req.Header.Set("Authorization",
+		fmt.Sprintf(`MediaBrowser Client="MediaFS", Device="MediaFS", DeviceId="mediafs-cli", Version="1.0", Token="%s"`, c.apiKey))
+
+	log.Printf("[http] GET %s (auth header: %s)", path, c.authHeader)
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -261,7 +269,8 @@ func (c *Client) get(path string, params url.Values) (*http.Response, error) {
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		return nil, fmt.Errorf("jellyfin %s → %d: %s", path, resp.StatusCode, body)
+		log.Printf("[http] GET %s → %d: %s", path, resp.StatusCode, body)
+		return nil, fmt.Errorf("%s → HTTP %d: %s", path, resp.StatusCode, body)
 	}
 	return resp, nil
 }
