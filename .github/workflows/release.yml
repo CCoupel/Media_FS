@@ -41,13 +41,9 @@ jobs:
           fi
           echo "✓ Version reference is clean"
 
-      - name: Install libfuse3 (required by go vet — cgofuse links against it)
-        run: sudo apt-get update && sudo apt-get install -y libfuse3-dev
-
       - name: go vet
         env:
-          CGO_ENABLED: '1'
-          CGO_CFLAGS: '-I/usr/include/fuse3'
+          CGO_ENABLED: '0'   # skip CGO compilation — fuse/winfsp headers not available here
         run: go vet ./...
 
 # ─── build (parallel) ─────────────────────────────────────────────────────────
