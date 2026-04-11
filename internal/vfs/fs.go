@@ -78,7 +78,7 @@ func (fs *MediaFS) Getattr(path string, stat *fuse.Stat_t, fh uint64) int {
 
 	switch len(parts) {
 	case 0: // root "/"
-		stat.Mode = fuse.S_IFDIR | 0555
+		dirStat(stat)
 		return 0
 	case 1: // "user@server" folder
 		fs.mu.RLock()
@@ -87,7 +87,7 @@ func (fs *MediaFS) Getattr(path string, stat *fuse.Stat_t, fh uint64) int {
 		if !ok {
 			return -fuse.ENOENT
 		}
-		stat.Mode = fuse.S_IFDIR | 0555
+		dirStat(stat)
 		return 0
 	case 2: // "user@server/LibraryName" folder
 		fs.mu.RLock()
@@ -98,7 +98,7 @@ func (fs *MediaFS) Getattr(path string, stat *fuse.Stat_t, fh uint64) int {
 		}
 		for _, lib := range srv.Libraries {
 			if lib.Name == parts[1] {
-				stat.Mode = fuse.S_IFDIR | 0555
+				dirStat(stat)
 				return 0
 			}
 		}
@@ -141,7 +141,7 @@ func (fs *MediaFS) Getattr(path string, stat *fuse.Stat_t, fh uint64) int {
 	}
 
 	if item.IsFolder {
-		stat.Mode = fuse.S_IFDIR | 0555
+		dirStat(stat)
 	} else {
 		stat.Mode = fuse.S_IFREG | 0444
 		stat.Size = item.FileSize
@@ -171,7 +171,7 @@ func (fs *MediaFS) Readdir(path string,
 		defer fs.mu.RUnlock()
 		log.Printf("[vfs] root: %d servers", len(fs.servers))
 		for key := range fs.servers {
-			fill(key, &fuse.Stat_t{Mode: fuse.S_IFDIR | 0555}, 0)
+			fill(key, &fuse.Stat_t{Mode: fuse.S_IFDIR | 0555, Nlink: 2}, 0)
 		}
 		return 0
 	}
@@ -187,7 +187,7 @@ func (fs *MediaFS) Readdir(path string,
 		}
 		log.Printf("[vfs] server %q: %d libraries", parts[0], len(srv.Libraries))
 		for _, lib := range srv.Libraries {
-			fill(lib.Name, &fuse.Stat_t{Mode: fuse.S_IFDIR | 0555}, 0)
+			fill(lib.Name, &fuse.Stat_t{Mode: fuse.S_IFDIR | 0555, Nlink: 2}, 0)
 		}
 		return 0
 	}
@@ -203,6 +203,7 @@ func (fs *MediaFS) Readdir(path string,
 		st := &fuse.Stat_t{}
 		if it.IsFolder {
 			st.Mode = fuse.S_IFDIR | 0555
+			st.Nlink = 2
 		} else {
 			st.Mode = fuse.S_IFREG | 0444
 			st.Size = it.FileSize
@@ -351,6 +352,13 @@ func (fs *MediaFS) Unlink(path string) int                                    { 
 func (fs *MediaFS) Rename(oldpath, newpath string) int                        { return -fuse.EPERM }
 
 // --- helpers ---
+
+// dirStat fills stat as a read-only directory.
+// Nlink=2 tells Windows Explorer the folder may have children (shows expand arrow).
+func dirStat(stat *fuse.Stat_t) {
+	stat.Mode = fuse.S_IFDIR | 0555
+	stat.Nlink = 2
+}
 
 func splitPath(path string) []string {
 	path = strings.TrimPrefix(path, "/")
