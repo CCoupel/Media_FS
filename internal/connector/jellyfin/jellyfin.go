@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/CCoupel/Media_FS/internal/config"
@@ -41,9 +42,9 @@ func (c *Client) Connect(cfg config.ServerConfig) error {
 	c.http = &http.Client{Timeout: 15 * time.Second}
 
 	if cfg.APIKey != "" {
-		log.Printf("[jellyfin] connecting %s via API key", cfg.URL)
+		log.Printf("[jellyfin] connecting %s via API key, username=%q", cfg.URL, cfg.Username)
 		c.apiKey = cfg.APIKey
-		userID, err := c.resolveCurrentUserID()
+		userID, err := c.resolveUserID(cfg.Username)
 		if err != nil {
 			return fmt.Errorf("jellyfin connect: %w", err)
 		}
@@ -299,25 +300,35 @@ func (c *Client) authenticateByPassword(username, password string) (string, stri
 	return result.AccessToken, result.User.ID, nil
 }
 
-// resolveCurrentUserID returns the user ID of the currently authenticated user
-// using GET /Users/Me (works for any API key, no admin required).
-func (c *Client) resolveCurrentUserID() (string, error) {
-	resp, err := c.get("/Users/Me", nil)
+// resolveUserID resolves a username to a Jellyfin user ID using GET /Users.
+// Jellyfin API keys have admin access and can call this endpoint.
+// If username is not found, falls back to the first user in the list.
+func (c *Client) resolveUserID(username string) (string, error) {
+	resp, err := c.get("/Users", nil)
 	if err != nil {
-		return "", fmt.Errorf("resolveCurrentUserID: %w", err)
+		return "", fmt.Errorf("GET /Users failed (API key must have admin access): %w", err)
 	}
 	defer resp.Body.Close()
 
-	var user struct {
-		ID string `json:"Id"`
+	var users []struct {
+		ID   string `json:"Id"`
+		Name string `json:"Name"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&user); err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&users); err != nil {
 		return "", err
 	}
-	if user.ID == "" {
-		return "", fmt.Errorf("empty user ID in /Users/Me response")
+	log.Printf("[jellyfin] /Users returned %d users", len(users))
+	for _, u := range users {
+		if strings.EqualFold(u.Name, username) {
+			log.Printf("[jellyfin] matched user %q → id=%s", username, u.ID)
+			return u.ID, nil
+		}
 	}
-	return user.ID, nil
+	if len(users) > 0 {
+		log.Printf("[jellyfin] user %q not found, using first: %s (id=%s)", username, users[0].Name, users[0].ID)
+		return users[0].ID, nil
+	}
+	return "", fmt.Errorf("no users found on server")
 }
 
 func collectionTypeToItemType(ct string) connector.ItemType {
