@@ -394,18 +394,18 @@ func (fs *MediaFS) resolveItem(parts []string) (*connector.MediaItem, error) {
 		return nil, nil
 	}
 
-	// Walk down the path
+	// Walk down the path: parts[2], parts[3], …
 	parentID := ""
 	var found *connector.MediaItem
-	for depth := 2; depth <= len(parts); depth++ {
+	for i := 2; i < len(parts); i++ {
 		items, err := fs.listItemsCached(parts[0], lib.ID, parentID)
 		if err != nil {
 			return nil, err
 		}
 		var next *connector.MediaItem
-		for i := range items {
-			if items[i].Name == parts[depth-1] {
-				next = &items[i]
+		for j := range items {
+			if items[j].Name == parts[i] {
+				next = &items[j]
 				break
 			}
 		}
