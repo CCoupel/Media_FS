@@ -1,12 +1,8 @@
 package tray
 
 import (
-	"bytes"
-	"encoding/binary"
 	"fmt"
-	"image"
-	"image/color"
-	"image/png"
+	"sync"
 
 	"fyne.io/systray"
 
@@ -22,13 +18,13 @@ type ServerStatus struct {
 
 // Callbacks are called by the tray in response to user actions.
 type Callbacks struct {
-	OnMount        func(serverKey string)
-	OnUnmount      func(serverKey string)
-	OnMountAll     func()
-	OnUnmountAll   func()
-	OnOpenConfig   func() // opens the web config UI in the browser
-	OnRefresh      func(serverKey string)
-	OnQuit         func()
+	OnMount      func(serverKey string)
+	OnUnmount    func(serverKey string)
+	OnMountAll   func()
+	OnUnmountAll func()
+	OnOpenConfig func() // opens the web config UI in the browser
+	OnRefresh    func(serverKey string)
+	OnQuit       func()
 }
 
 // Manager manages the system tray icon and menu.
@@ -39,6 +35,12 @@ type Manager struct {
 
 	// menu item references for dynamic updates
 	serverItems map[string]*systray.MenuItem
+
+	// icon state
+	mu       sync.Mutex
+	ready    bool
+	state    TrayState
+	winfspOK bool // false → always show Error regardless of server state
 }
 
 // New creates a new tray Manager. Call Run() to start the tray event loop.
@@ -48,7 +50,17 @@ func New(cfg *config.Config, cb Callbacks) *Manager {
 		cb:          cb,
 		statuses:    make(map[string]*ServerStatus),
 		serverItems: make(map[string]*systray.MenuItem),
+		winfspOK:    true,
 	}
+}
+
+// MarkSysError forces the tray into permanent Error state (e.g. WinFSP absent).
+// Safe to call from any goroutine at any time.
+func (m *Manager) MarkSysError() {
+	m.mu.Lock()
+	m.winfspOK = false
+	m.mu.Unlock()
+	m.SetState(TrayStateError)
 }
 
 // Run starts the systray event loop. Blocks until the tray is stopped.
@@ -56,18 +68,84 @@ func (m *Manager) Run() {
 	systray.Run(m.onReady, m.onExit)
 }
 
-// UpdateStatus refreshes the menu item for a given server (green/red indicator).
+// UpdateStatus refreshes the menu item for a given server and recomputes the
+// tray icon state from all known server statuses.
 func (m *Manager) UpdateStatus(key string, mounted bool, errMsg string) {
 	m.statuses[key] = &ServerStatus{Key: key, Mounted: mounted, Error: errMsg}
 	if item, ok := m.serverItems[key]; ok {
 		item.SetTitle(serverLabel(key, mounted, errMsg))
 	}
+	m.updateTrayState()
+}
+
+// SetState updates the tray icon to reflect the given state.
+// Safe to call from any goroutine after Run() has been called.
+func (m *Manager) SetState(state TrayState) {
+	m.mu.Lock()
+	m.state = state
+	rdy := m.ready
+	m.mu.Unlock()
+	if rdy {
+		systray.SetIcon(generateTrayIcon(state))
+	}
+}
+
+// updateTrayState recomputes the TrayState from current server statuses and
+// calls SetState. Logic:
+//   - all servers mounted, no errors → Active (green ▶)
+//   - some servers failed, some OK   → Warning (orange ▶)
+//   - all servers failed             → Error (red ✕)
+//   - no servers mounted, no errors  → Idle (grey ⏸)
+func (m *Manager) updateTrayState() {
+	m.mu.Lock()
+	winfspOK := m.winfspOK
+	m.mu.Unlock()
+	if !winfspOK {
+		m.SetState(TrayStateError)
+		return
+	}
+
+	mounted, errored, enabled := 0, 0, 0
+	for _, srv := range m.cfg.Servers {
+		if !srv.Enabled {
+			continue
+		}
+		enabled++
+		if s, ok := m.statuses[srv.ServerKey()]; ok {
+			if s.Error != "" {
+				errored++
+			} else if s.Mounted {
+				mounted++
+			}
+		}
+	}
+
+	var state TrayState
+	switch {
+	case enabled == 0:
+		state = TrayStateIdle
+	case errored == enabled:
+		state = TrayStateError
+	case errored > 0 || (mounted > 0 && mounted < enabled):
+		state = TrayStateWarning
+	case mounted == enabled:
+		state = TrayStateActive
+	default:
+		state = TrayStateIdle
+	}
+	m.SetState(state)
 }
 
 func (m *Manager) onReady() {
 	systray.SetTitle("MediaFS")
 	systray.SetTooltip("Media_FS — Virtual Media Library")
-	setIcon(systray.SetIcon)
+
+	// Initialise icon with current state (Idle until first mount completes).
+	m.mu.Lock()
+	m.ready = true
+	state := m.state
+	m.mu.Unlock()
+	systray.SetIcon(generateTrayIcon(state))
 
 	// Per-server submenu
 	for _, srv := range m.cfg.Servers {
@@ -149,45 +227,4 @@ func serverLabel(key string, mounted bool, errMsg string) string {
 		indicator = "✕"
 	}
 	return fmt.Sprintf("%s %s", indicator, key)
-}
-
-// setIcon sets the tray icon.
-// Generates a minimal 16×16 PNG at runtime until real assets are embedded (issue #16).
-func setIcon(fn func([]byte)) {
-	fn(generateDefaultIcon())
-}
-
-func generateDefaultIcon() []byte {
-	img := image.NewRGBA(image.Rect(0, 0, 16, 16))
-	col := color.RGBA{R: 99, G: 102, B: 241, A: 255} // indigo — placeholder until #16
-	for y := 0; y < 16; y++ {
-		for x := 0; x < 16; x++ {
-			img.Set(x, y, col)
-		}
-	}
-	var pngBuf bytes.Buffer
-	_ = png.Encode(&pngBuf, img)
-	return wrapInICO(pngBuf.Bytes(), 16)
-}
-
-// wrapInICO wraps PNG bytes into a minimal ICO container (Vista+ PNG-in-ICO format).
-// fyne.io/systray on Windows requires ICO format; PNG embedded in ICO is supported
-// on Windows Vista and later via CreateIconFromResourceEx.
-func wrapInICO(pngData []byte, size int) []byte {
-	buf := make([]byte, 22+len(pngData))
-	// ICO header
-	binary.LittleEndian.PutUint16(buf[0:], 0) // reserved
-	binary.LittleEndian.PutUint16(buf[2:], 1) // type = 1 (ICO)
-	binary.LittleEndian.PutUint16(buf[4:], 1) // count = 1 image
-	// Directory entry
-	buf[6] = byte(size) // width
-	buf[7] = byte(size) // height
-	buf[8] = 0          // color count (0 = no palette)
-	buf[9] = 0          // reserved
-	binary.LittleEndian.PutUint16(buf[10:], 1)                    // planes
-	binary.LittleEndian.PutUint16(buf[12:], 32)                   // bit count
-	binary.LittleEndian.PutUint32(buf[14:], uint32(len(pngData))) // image data size
-	binary.LittleEndian.PutUint32(buf[18:], 22)                   // image data offset
-	copy(buf[22:], pngData)
-	return buf
 }

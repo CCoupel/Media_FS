@@ -15,6 +15,7 @@ import (
 	_ "github.com/CCoupel/Media_FS/internal/connector/emby"
 	_ "github.com/CCoupel/Media_FS/internal/connector/jellyfin"
 	"github.com/CCoupel/Media_FS/internal/downloader"
+	"github.com/CCoupel/Media_FS/internal/syscheck"
 	"github.com/CCoupel/Media_FS/internal/tray"
 	"github.com/CCoupel/Media_FS/internal/version"
 	"github.com/CCoupel/Media_FS/internal/vfs"
@@ -25,6 +26,7 @@ import (
 
 func main() {
 	log.Printf("Media_FS %s", version.Version)
+	ensureSingleInstance()
 	if len(os.Args) > 1 {
 		runCLI(os.Args[1:])
 		return
@@ -89,12 +91,19 @@ func runTray() {
 		OnUnmount:    func(key string) { /* TODO */ },
 		OnRefresh:    func(key string) { cacheInst.Invalidate(key) },
 		OnOpenConfig: func() {
-			if webSrv != nil {
-				openConfigPopup(webSrv.URL())
+			if webSrv == nil || webSrv.ConfigWindowOpen() {
+				return
 			}
+			openConfigPopup(webSrv.URL())
 		},
 		OnQuit: func() { os.Exit(0) },
 	})
+
+	// Check WinFSP presence — force Error state if absent/incompatible.
+	if st := syscheck.CheckWinFSP(); !st.Compatible {
+		log.Printf("syscheck: WinFSP %s", st.Note)
+		go trayMgr.MarkSysError()
+	}
 
 	// Auto-mount on start
 	go mountAll(cfg, fs, trayMgr)
@@ -344,6 +353,7 @@ func openBrowser(url string) {
 
 // openConfigPopup opens the config UI as a minimal popup window using Edge app mode.
 // Falls back to the system browser if Edge is not found.
+// Window lifecycle is tracked server-side via SSE (see webui.Server.ConfigWindowOpen).
 func openConfigPopup(url string) {
 	if runtime.GOOS == "windows" {
 		edgePaths := []string{

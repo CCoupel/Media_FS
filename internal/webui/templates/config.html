@@ -53,6 +53,14 @@
     .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; padding: 1.25rem; }
     .save-bar { position: sticky; bottom: 0; background: #1a1d2e; border-top: 1px solid #2d3748; padding: .75rem 1.5rem; display: flex; justify-content: flex-end; gap: .75rem; }
 
+    /* System status */
+    .syscheck-row { display: flex; align-items: center; gap: 1rem; padding: .9rem 1.25rem; }
+    .badge-ok   { background: #14532d; color: #86efac; font-size: .75rem; font-weight: 600; padding: .2rem .6rem; border-radius: 999px; }
+    .badge-warn { background: #451a03; color: #fed7aa; font-size: .75rem; font-weight: 600; padding: .2rem .6rem; border-radius: 999px; }
+    .badge-err  { background: #450a0a; color: #fca5a5; font-size: .75rem; font-weight: 600; padding: .2rem .6rem; border-radius: 999px; }
+    .syscheck-label { font-size: .9rem; font-weight: 600; flex: 1; }
+    .syscheck-note  { font-size: .8rem; color: #94a3b8; }
+
     /* Monitor tab */
     .file-block { border-bottom: 1px solid #2d3748; padding: 1rem 1.25rem; }
     .file-block:last-child { border-bottom: none; }
@@ -95,6 +103,18 @@
 
 <!-- ===== CONFIGURATION TAB ===== -->
 <div id="tab-config">
+
+  <!-- System prerequisites -->
+  <section>
+    <h2>Prérequis système</h2>
+    <div class="card" id="syscheck-card">
+      <div class="syscheck-row">
+        <span class="syscheck-label">WinFSP</span>
+        <span id="syscheck-badge" class="badge-warn">—</span>
+        <span id="syscheck-note" class="syscheck-note"></span>
+      </div>
+    </div>
+  </section>
 
   <!-- Servers -->
   <section>
@@ -588,6 +608,33 @@ async function saveConfig() {
 document.getElementById('monitor-content').appendChild(
   el('div', {className: 'monitor-empty'}, 'Aucun fichier ouvert en ce moment.')
 );
+
+// ─── SYSTEM STATUS ────────────────────────────────────────────────
+async function loadSystemStatus() {
+  try {
+    const r = await fetch('/api/system/status');
+    if (!r.ok) return;
+    const data = await r.json();
+    const w = data.winfsp;
+    if (!w) return;
+    const badge = document.getElementById('syscheck-badge');
+    const note  = document.getElementById('syscheck-note');
+    if (!w.present) {
+      badge.className = 'badge-err'; badge.textContent = 'Absent';
+    } else if (!w.compatible) {
+      badge.className = 'badge-warn'; badge.textContent = 'v' + w.version;
+    } else {
+      badge.className = 'badge-ok'; badge.textContent = w.version !== 'N/A' ? 'v' + w.version : 'OK';
+    }
+    note.textContent = w.note || '';
+  } catch (_) {}
+}
+loadSystemStatus();
+
+// Keep-alive SSE session: tells the server this config window is open.
+// The connection is closed automatically when this tab/window is closed,
+// which allows the tray to know the window is no longer visible.
+new EventSource('/api/config-session');
 </script>
 </body>
 </html>

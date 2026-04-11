@@ -20,20 +20,42 @@ Full functional specs: [SPECS.md](SPECS.md)
 
 CGO is required (cgofuse links against WinFSP / libfuse).
 
+### Windows
+
+Prérequis installés sur cette machine :
+- **WinFSP** : `C:\Program Files (x86)\WinFsp\` (v2.1.25156)
+- **MinGW-w64 (gcc)** : `C:\mingw64\bin\`
+
+Les headers WinFSP doivent être stagés dans un chemin sans espaces avant de builder (opération ponctuelle — à refaire si WinFSP est réinstallé) :
+
+```powershell
+# Staging WinFSP (une seule fois)
+New-Item -ItemType Directory -Force C:\winfsp\inc\fuse, C:\winfsp\lib
+Copy-Item "C:\Program Files (x86)\WinFsp\inc\fuse\*" C:\winfsp\inc\fuse\
+Copy-Item "C:\Program Files (x86)\WinFsp\lib\winfsp-x64.lib" C:\winfsp\lib\libwinfsp.a
+```
+
 ```bash
-# Windows — prérequis : WinFSP (C:\Program Files (x86)\WinFsp) + MinGW-w64 (C:\mingw64)
-PATH="/c/mingw64/bin:$PATH" CGO_ENABLED=1 GOOS=windows \
-  CGO_CFLAGS="-IC:/PROGRA~2/WinFsp/inc/fuse" \
+# Build (bash / Git Bash)
+export PATH="/c/mingw64/bin:$PATH"
+CGO_ENABLED=1 \
+  CGO_CFLAGS="-IC:/winfsp/inc/fuse" \
+  CGO_LDFLAGS="-LC:/winfsp/lib -lwinfsp" \
   go build -o dist/mediafs.exe ./cmd/mediafs
+```
 
-# Linux (requires libfuse3-dev)
-CGO_ENABLED=1 GOOS=linux go build -o dist/mediafs ./cmd/mediafs
+### Linux
 
-# Run (mounts all configured servers)
-./dist/mediafs mount
+```bash
+sudo apt-get install -y libfuse3-dev gcc
+CGO_ENABLED=1 go build -o dist/mediafs ./cmd/mediafs
+```
 
-# Run with system tray (default mode)
-./dist/mediafs
+### Run
+
+```bash
+./dist/mediafs          # mode tray (défaut)
+./dist/mediafs mount    # headless — monte tous les serveurs configurés
 ```
 
 ## Tests & Lint

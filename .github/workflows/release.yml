@@ -70,6 +70,29 @@ jobs:
           # Rename .lib → libXXX.a so MinGW's ld can find it with -lwinfsp
           Copy-Item "C:\Program Files (x86)\WinFsp\lib\winfsp-x64.lib" C:\winfsp\lib\libwinfsp.a
 
+      - name: Install go-winres
+        run: go install github.com/tc-hib/go-winres@latest
+
+      - name: Generate Windows resources (exe icon + version metadata)
+        shell: pwsh
+        run: |
+          $env:PATH = "C:\msys64\mingw64\bin;$env:PATH"
+          cd cmd/mediafs
+
+          # Step 1 — inject release version into winres.json
+          # Tag is "v1.2.3" -> semver "1.2.3", winver "1.2.3.0"
+          $semver = "${{ env.VERSION }}" -replace '^v', ''
+          $winver = "$semver.0"
+          $json = Get-Content winres/winres.json -Raw | ConvertFrom-Json
+          $json.RT_VERSION.'#1'.'0000'.fixed.file_version    = $winver
+          $json.RT_VERSION.'#1'.'0000'.fixed.product_version = $winver
+          $json.RT_VERSION.'#1'.'0000'.info.'0409'.FileVersion    = $semver
+          $json.RT_VERSION.'#1'.'0000'.info.'0409'.ProductVersion = $semver
+          $json | ConvertTo-Json -Depth 10 | Set-Content winres/winres.json
+
+          # Step 3 — generate .syso with versioned resources
+          go-winres make
+
       - name: Build
         shell: pwsh
         env:
@@ -101,8 +124,8 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Install libfuse3
-        run: sudo apt-get update && sudo apt-get install -y libfuse3-dev
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y libfuse3-dev rpm
 
       - name: Build
         env:
@@ -114,10 +137,27 @@ jobs:
             -o "dist/mediafs-${{ env.VERSION }}-linux-amd64" \
             ./cmd/mediafs
 
+      - name: Install nfpm
+        run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+
+      - name: Package DEB and RPM
+        run: |
+          # nfpm expects a version without the leading 'v'
+          SEMVER="${{ env.VERSION }}"
+          SEMVER="${SEMVER#v}"
+          # stage binary under a fixed name consumed by nfpm.yaml
+          cp "dist/mediafs-${{ env.VERSION }}-linux-amd64" dist/mediafs-linux-amd64
+          SEMVER="$SEMVER" nfpm package --config packaging/nfpm.yaml --packager deb --target dist/
+          SEMVER="$SEMVER" nfpm package --config packaging/nfpm.yaml --packager rpm --target dist/
+          rm dist/mediafs-linux-amd64
+
       - uses: actions/upload-artifact@v4
         with:
           name: linux-amd64
-          path: dist/mediafs-${{ env.VERSION }}-linux-amd64
+          path: |
+            dist/mediafs-${{ env.VERSION }}-linux-amd64
+            dist/*.deb
+            dist/*.rpm
 
 # ─── release ──────────────────────────────────────────────────────────────────
 

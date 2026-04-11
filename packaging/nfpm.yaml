@@ -1,0 +1,20 @@
+name: "mediafs"
+arch: "amd64"
+platform: "linux"
+version: "${SEMVER}"
+maintainer: "CCoupel <noreply@github.com>"
+description: |
+  Virtual filesystem that exposes Jellyfin, Emby and Plex libraries
+  as a mountable drive via FUSE. Navigate your media server from any
+  file manager as if it were a local drive — no sync, no local copy.
+homepage: "https://github.com/CCoupel/Media_FS"
+license: "MIT"
+
+depends:
+  - fuse3
+
+contents:
+  - src: "dist/mediafs-linux-amd64"
+    dst: "/usr/bin/mediafs"
+    file_info:
+      mode: 0755

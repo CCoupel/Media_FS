@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/CCoupel/Media_FS/internal/config"
@@ -17,6 +18,7 @@ import (
 	_ "github.com/CCoupel/Media_FS/internal/connector/emby"
 	_ "github.com/CCoupel/Media_FS/internal/connector/jellyfin"
 	"github.com/CCoupel/Media_FS/internal/downloader"
+	"github.com/CCoupel/Media_FS/internal/syscheck"
 	"github.com/CCoupel/Media_FS/internal/version"
 )
 
@@ -36,6 +38,28 @@ type Server struct {
 	purgeCache    func(float64) int
 	purgeFile     func(uint64) bool
 	purgeWindow   func(uint64, int64) bool
+
+	// configSessions counts active SSE connections from the config page.
+	// Used to prevent opening a second configuration window.
+	configSessions int32
+}
+
+// ConfigWindowOpen returns true if the configuration page is currently open
+// in a browser (tracked via a SSE keep-alive connection).
+func (s *Server) ConfigWindowOpen() bool {
+	return atomic.LoadInt32(&s.configSessions) > 0
+}
+
+// handleConfigSession is an SSE endpoint. The config page connects to it on
+// load; the connection stays open until the page is closed. This lets the
+// server know exactly how many config windows are currently visible.
+func (s *Server) handleConfigSession(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no")
+	atomic.AddInt32(&s.configSessions, 1)
+	defer atomic.AddInt32(&s.configSessions, -1)
+	<-r.Context().Done() // blocks until the browser tab / window is closed
 }
 
 // SetCachePurge wires up the global cache purge callback.
@@ -97,6 +121,8 @@ func (s *Server) Start() {
 	mux.HandleFunc("/api/monitor/purge-cache", s.handlePurgeCache)
 	mux.HandleFunc("/api/monitor/purge-file", s.handlePurgeFile)
 	mux.HandleFunc("/api/monitor/purge-window", s.handlePurgeWindow)
+	mux.HandleFunc("/api/config-session", s.handleConfigSession)
+	mux.HandleFunc("/api/system/status", s.handleSystemStatus)
 
 	go http.Serve(s.listener, mux) //nolint:errcheck
 }
@@ -354,6 +380,13 @@ func (s *Server) handlePurgeWindow(w http.ResponseWriter, r *http.Request) {
 		s.purgeWindow(body.FH, body.Start)
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) handleSystemStatus(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"winfsp": syscheck.CheckWinFSP(),
+	})
 }
 
 func jsonError(w http.ResponseWriter, msg string) {
