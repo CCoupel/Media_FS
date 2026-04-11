@@ -73,6 +73,7 @@
           </div>
           <span class="status-dot" id="dot-{{.Alias}}"></span>
           <button class="btn btn-ghost btn-sm" onclick="testServer('{{.Alias}}','{{.URL}}','{{.Type}}','{{.Username}}','{{.APIKey}}')">Tester</button>
+          <button class="btn btn-ghost btn-sm" onclick="editServer('{{.Alias}}','{{.URL}}','{{.Type}}','{{.Username}}','{{.APIKey}}')">Modifier</button>
           <button class="btn btn-danger btn-sm" onclick="removeServer('{{.Alias}}')">Retirer</button>
         </div>
         {{else}}
@@ -84,6 +85,7 @@
 
       <!-- Add form -->
       <div id="add-form" class="add-form">
+        <input type="hidden" id="f-editing-alias" value="">
         <div class="form-grid">
           <div>
             <label>Type de serveur</label>
@@ -112,9 +114,9 @@
         </div>
         <div class="form-actions">
           <span id="add-notice" class="notice"></span>
-          <button class="btn btn-ghost" onclick="toggleAddForm()">Annuler</button>
+          <button class="btn btn-ghost" onclick="cancelForm()">Annuler</button>
           <button class="btn btn-ghost btn-sm" onclick="testFormServer()">Tester la connexion</button>
-          <button class="btn btn-primary" onclick="addServer()">Ajouter</button>
+          <button class="btn btn-primary" id="submit-btn" onclick="submitServer()">Ajouter</button>
         </div>
       </div>
 
@@ -158,11 +160,33 @@
 
 <script>
 function toggleAddForm() {
+  document.getElementById('f-editing-alias').value = '';
+  document.getElementById('submit-btn').textContent = 'Ajouter';
+  document.getElementById('f-alias').disabled = false;
   const f = document.getElementById('add-form');
   f.classList.toggle('open');
 }
 
-async function addServer() {
+function cancelForm() {
+  document.getElementById('f-editing-alias').value = '';
+  document.getElementById('add-form').classList.remove('open');
+}
+
+function editServer(alias, url, type, username, apiKey) {
+  document.getElementById('f-editing-alias').value = alias;
+  document.getElementById('f-alias').value = alias;
+  document.getElementById('f-alias').disabled = true; // alias is the key, can't change it
+  document.getElementById('f-type').value = type;
+  document.getElementById('f-url').value = url;
+  document.getElementById('f-user').value = username;
+  document.getElementById('f-key').value = apiKey;
+  document.getElementById('submit-btn').textContent = 'Mettre à jour';
+  document.getElementById('add-form').classList.add('open');
+  document.getElementById('add-form').scrollIntoView({behavior:'smooth'});
+}
+
+async function submitServer() {
+  const editingAlias = document.getElementById('f-editing-alias').value;
   const body = {
     alias:    document.getElementById('f-alias').value,
     type:     document.getElementById('f-type').value,
@@ -171,9 +195,12 @@ async function addServer() {
     api_key:  document.getElementById('f-key').value,
     enabled:  true
   };
-  const r = await fetch('/api/servers/add', {method:'POST', body: JSON.stringify(body)});
-  if (r.ok) { location.reload(); } else { showNotice('add-notice', 'Erreur lors de l\'ajout', true); }
+  const endpoint = editingAlias ? '/api/servers/update' : '/api/servers/add';
+  const r = await fetch(endpoint, {method:'POST', body: JSON.stringify(body)});
+  if (r.ok) { location.reload(); } else { showNotice('add-notice', 'Erreur lors de l\'enregistrement', true); }
 }
+
+async function addServer() { await submitServer(); }
 
 async function removeServer(alias) {
   if (!confirm('Retirer ' + alias + ' ?')) return;

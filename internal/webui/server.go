@@ -12,6 +12,9 @@ import (
 	"strings"
 
 	"github.com/CCoupel/Media_FS/internal/config"
+	"github.com/CCoupel/Media_FS/internal/connector"
+	_ "github.com/CCoupel/Media_FS/internal/connector/emby"
+	_ "github.com/CCoupel/Media_FS/internal/connector/jellyfin"
 )
 
 //go:embed templates/*
@@ -57,6 +60,7 @@ func (s *Server) Start() {
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/api/servers", s.handleServers)
 	mux.HandleFunc("/api/servers/add", s.handleAddServer)
+	mux.HandleFunc("/api/servers/update", s.handleUpdateServer)
 	mux.HandleFunc("/api/servers/remove", s.handleRemoveServer)
 	mux.HandleFunc("/api/servers/test", s.handleTestServer)
 	mux.HandleFunc("/api/save", s.handleSave)
@@ -125,6 +129,26 @@ func (s *Server) handleRemoveServer(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+func (s *Server) handleUpdateServer(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST required", 405)
+		return
+	}
+	var srv config.ServerConfig
+	if err := json.NewDecoder(r.Body).Decode(&srv); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	for i, existing := range s.cfg.Servers {
+		if existing.Alias == srv.Alias {
+			s.cfg.Servers[i] = srv
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+	}
+	http.Error(w, fmt.Sprintf("server %q not found", srv.Alias), 404)
+}
+
 func (s *Server) handleTestServer(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "POST required", 405)
@@ -136,14 +160,19 @@ func (s *Server) handleTestServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: instantiate connector and call Ping()
-	// For now, just validate that URL is reachable
-	resp, err := http.Get(srv.URL + "/System/Info/Public")
-	if err != nil {
+	conn := connector.New(srv.Type)
+	if conn == nil {
+		jsonError(w, fmt.Sprintf("type de connecteur inconnu : %s", srv.Type))
+		return
+	}
+	if err := conn.Connect(srv); err != nil {
 		jsonError(w, err.Error())
 		return
 	}
-	resp.Body.Close()
+	if err := conn.Ping(); err != nil {
+		jsonError(w, err.Error())
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
