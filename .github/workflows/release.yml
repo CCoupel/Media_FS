@@ -43,8 +43,13 @@ jobs:
 
       - name: go vet
         env:
-          CGO_ENABLED: '0'   # skip CGO compilation — fuse/winfsp headers not available here
-        run: go vet ./...
+          CGO_ENABLED: '0'
+        run: |
+          # internal/vfs and cmd/mediafs import cgofuse which requires platform
+          # headers (WinFSP / libfuse). They are fully compiled in the build jobs.
+          # Vet everything else (config, cache, connector, downloader, webui, …).
+          PKGS=$(go list ./... | grep -v -E 'github\.com/CCoupel/Media_FS/(internal/vfs|cmd/mediafs)$')
+          go vet $PKGS
 
 # ─── build (parallel) ─────────────────────────────────────────────────────────
 
