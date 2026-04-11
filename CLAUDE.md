@@ -43,9 +43,30 @@ go test -run TestJellyfin ./...        # single test by name
 golangci-lint run                      # lint
 ```
 
-## Module
+## Module & Repo
 
-Module path: `mediafs` — update to match the GitHub remote once the repo is published.
+- Module path: `github.com/CCoupel/Media_FS`
+- GitHub: https://github.com/CCoupel/Media_FS
+- Issues / backlog: https://github.com/CCoupel/Media_FS/issues
+- Marketing site: https://ccoupel.github.io/Media_FS/
+
+## Skills disponibles
+
+| Commande | Rôle |
+|---|---|
+| `/marketing` | Régénère et déploie le site GitHub Pages (`gh-pages` branch) |
+
+## Backlog
+
+16 issues actives organisées en 5 épiques :
+
+| Épique | Issues | Priorité |
+|---|---|---|
+| [#17 Epic P0 — Core VFS](https://github.com/CCoupel/Media_FS/issues/17) | #1 #2 #3 #4 #5 #6 #7 #8 | MVP |
+| [#18 Epic P1.1 — Métadonnées](https://github.com/CCoupel/Media_FS/issues/18) | #9 #10 #11 #12 | Post-MVP |
+| [#19 Epic P1.2 — Shell Properties](https://github.com/CCoupel/Media_FS/issues/19) | #13 | Post-MVP |
+| [#20 Epic P3 — Plex](https://github.com/CCoupel/Media_FS/issues/20) | #14 | Future |
+| [#21 Epic Infrastructure](https://github.com/CCoupel/Media_FS/issues/21) | #15 #16 | Transverse |
 
 ## Key constraints
 
