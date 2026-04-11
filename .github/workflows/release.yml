@@ -11,6 +11,7 @@ permissions:
 env:
   VERSION: ${{ github.ref_name }}
   LDFLAGS: -X github.com/CCoupel/Media_FS/internal/version.Version=${{ github.ref_name }}
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 # ─── verify ───────────────────────────────────────────────────────────────────
 # Guarantees:
