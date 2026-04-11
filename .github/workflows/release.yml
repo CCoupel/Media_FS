@@ -11,7 +11,6 @@ permissions:
 env:
   VERSION: ${{ github.ref_name }}
   LDFLAGS: -X github.com/CCoupel/Media_FS/internal/version.Version=${{ github.ref_name }}
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 # ─── verify ───────────────────────────────────────────────────────────────────
 # Guarantees:
@@ -24,9 +23,9 @@ jobs:
     name: Verify version references
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6.0.2
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6.4.0
         with:
           go-version-file: go.mod
           cache: true
@@ -59,9 +58,9 @@ jobs:
     needs: verify
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6.0.2
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6.4.0
         with:
           go-version-file: go.mod
           cache: true
@@ -113,7 +112,7 @@ jobs:
             -o "dist/mediafs-${{ env.VERSION }}-windows-amd64.exe" `
             ./cmd/mediafs
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.1
         with:
           name: windows-amd64
           path: dist/mediafs-${{ env.VERSION }}-windows-amd64.exe
@@ -123,9 +122,9 @@ jobs:
     needs: verify
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6.0.2
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6.4.0
         with:
           go-version-file: go.mod
           cache: true
@@ -143,7 +142,7 @@ jobs:
             -o "dist/mediafs-${{ env.VERSION }}-linux-amd64" \
             ./cmd/mediafs
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.1
         with:
           name: linux-amd64
           path: dist/mediafs-${{ env.VERSION }}-linux-amd64
@@ -155,14 +154,14 @@ jobs:
     needs: build-linux
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4   # needed for packaging/nfpm.yaml
+      - uses: actions/checkout@v6.0.2   # needed for packaging/nfpm.yaml
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6.4.0
         with:
           go-version-file: go.mod
           cache: true
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8.0.1
         with:
           name: linux-amd64
           path: dist/
@@ -177,7 +176,7 @@ jobs:
           cp "dist/mediafs-${{ env.VERSION }}-linux-amd64" dist/mediafs-linux-amd64
           SEMVER="$SEMVER" nfpm package --config packaging/nfpm.yaml --packager deb --target dist/
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.1
         with:
           name: linux-deb
           path: dist/*.deb
@@ -187,14 +186,14 @@ jobs:
     needs: build-linux
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4   # needed for packaging/nfpm.yaml
+      - uses: actions/checkout@v6.0.2   # needed for packaging/nfpm.yaml
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6.4.0
         with:
           go-version-file: go.mod
           cache: true
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8.0.1
         with:
           name: linux-amd64
           path: dist/
@@ -211,7 +210,7 @@ jobs:
           cp "dist/mediafs-${{ env.VERSION }}-linux-amd64" dist/mediafs-linux-amd64
           SEMVER="$SEMVER" nfpm package --config packaging/nfpm.yaml --packager rpm --target dist/
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.1
         with:
           name: linux-rpm
           path: dist/*.rpm
@@ -223,13 +222,13 @@ jobs:
     needs: [build-windows, package-deb, package-rpm]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8.0.1
         with:
           merge-multiple: true
           path: dist/
 
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v2.6.1
         with:
           files: dist/*
           generate_release_notes: true   # auto-generates changelog from commits
