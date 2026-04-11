@@ -17,6 +17,7 @@ import (
 	_ "github.com/CCoupel/Media_FS/internal/connector/emby"
 	_ "github.com/CCoupel/Media_FS/internal/connector/jellyfin"
 	"github.com/CCoupel/Media_FS/internal/downloader"
+	"github.com/CCoupel/Media_FS/internal/version"
 )
 
 //go:embed templates/*
@@ -115,6 +116,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		"Servers":     s.cfg.Servers,
 		"MountConfig": s.cfg.Mount,
 		"Download":    s.cfg.Download,
+		"Version":     version.Version,
 	}
 	if err := s.tmpl.ExecuteTemplate(w, "config.html", data); err != nil {
 		http.Error(w, err.Error(), 500)

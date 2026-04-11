@@ -1,0 +1,138 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: write   # required to create the GitHub Release
+
+env:
+  VERSION: ${{ github.ref_name }}
+  LDFLAGS: -X github.com/CCoupel/Media_FS/internal/version.Version=${{ github.ref_name }}
+
+# ─── verify ───────────────────────────────────────────────────────────────────
+# Guarantees:
+#   1. The only authoritative version declaration is internal/version/version.go
+#   2. No other .go file hardcodes a vX.Y.Z version string
+#   3. go vet passes on all packages
+# Both build jobs depend on this job — a failure blocks the release.
+jobs:
+  verify:
+    name: Verify version references
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check no hardcoded version outside version.go
+        run: |
+          bad=$(grep -rn --include="*.go" 'Version\s*=\s*"v[0-9]' . \
+                | grep -v 'internal/version/version.go' || true)
+          if [ -n "$bad" ]; then
+            echo "❌ Hardcoded version string found outside internal/version/version.go:"
+            echo "$bad"
+            exit 1
+          fi
+          echo "✓ Version reference is clean"
+
+      - name: go vet
+        run: go vet ./...
+
+# ─── build (parallel) ─────────────────────────────────────────────────────────
+
+  build-windows:
+    name: Build Windows (amd64)
+    needs: verify
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install WinFSP
+        run: choco install winfsp --yes --no-progress
+
+      - name: Stage WinFSP headers (path without spaces)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force C:\winfsp\inc\fuse | Out-Null
+          New-Item -ItemType Directory -Force C:\winfsp\lib      | Out-Null
+          Copy-Item "C:\Program Files (x86)\WinFsp\inc\fuse\*" C:\winfsp\inc\fuse\
+          # Rename .lib → libXXX.a so MinGW's ld can find it with -lwinfsp
+          Copy-Item "C:\Program Files (x86)\WinFsp\lib\winfsp-x64.lib" C:\winfsp\lib\libwinfsp.a
+
+      - name: Build
+        shell: pwsh
+        env:
+          CGO_ENABLED: '1'
+          CGO_CFLAGS: '-IC:/winfsp/inc/fuse'
+          CGO_LDFLAGS: '-LC:/winfsp/lib -lwinfsp'
+        run: |
+          $env:PATH = "C:\msys64\mingw64\bin;$env:PATH"
+          New-Item -ItemType Directory -Force dist | Out-Null
+          go build `
+            -ldflags "${{ env.LDFLAGS }}" `
+            -o "dist/mediafs-${{ env.VERSION }}-windows-amd64.exe" `
+            ./cmd/mediafs
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-amd64
+          path: dist/mediafs-${{ env.VERSION }}-windows-amd64.exe
+
+  build-linux:
+    name: Build Linux (amd64)
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install libfuse3
+        run: sudo apt-get update && sudo apt-get install -y libfuse3-dev
+
+      - name: Build
+        env:
+          CGO_ENABLED: '1'
+        run: |
+          mkdir -p dist
+          go build \
+            -ldflags "${{ env.LDFLAGS }}" \
+            -o "dist/mediafs-${{ env.VERSION }}-linux-amd64" \
+            ./cmd/mediafs
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-amd64
+          path: dist/mediafs-${{ env.VERSION }}-linux-amd64
+
+# ─── release ──────────────────────────────────────────────────────────────────
+
+  release:
+    name: Create GitHub Release
+    needs: [build-windows, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: dist/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true   # auto-generates changelog from commits

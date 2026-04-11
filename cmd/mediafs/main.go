@@ -16,6 +16,7 @@ import (
 	_ "github.com/CCoupel/Media_FS/internal/connector/jellyfin"
 	"github.com/CCoupel/Media_FS/internal/downloader"
 	"github.com/CCoupel/Media_FS/internal/tray"
+	"github.com/CCoupel/Media_FS/internal/version"
 	"github.com/CCoupel/Media_FS/internal/vfs"
 	"github.com/CCoupel/Media_FS/internal/webui"
 
@@ -23,6 +24,7 @@ import (
 )
 
 func main() {
+	log.Printf("Media_FS %s", version.Version)
 	if len(os.Args) > 1 {
 		runCLI(os.Args[1:])
 		return
