@@ -73,8 +73,8 @@
             <div class="server-url">{{.URL}}</div>
           </div>
           <span class="status-dot" id="dot-{{.Alias}}"></span>
-          <button class="btn btn-ghost btn-sm" onclick="testServer('{{.Alias}}','{{.URL}}','{{.Type}}','{{.Username}}','{{.APIKey}}')">Tester</button>
-          <button class="btn btn-ghost btn-sm" onclick="editServer('{{.Alias}}','{{.URL}}','{{.Type}}','{{.Username}}','{{.APIKey}}')">Modifier</button>
+          <button class="btn btn-ghost btn-sm" onclick="testServer('{{.Alias}}','{{.URL}}','{{.Type}}','{{.Username}}','{{.APIKey}}','{{.Password}}')">Tester</button>
+          <button class="btn btn-ghost btn-sm" onclick="editServer('{{.Alias}}','{{.URL}}','{{.Type}}','{{.Username}}','{{.APIKey}}','{{.Password}}')">Modifier</button>
           <button class="btn btn-danger btn-sm" onclick="removeServer('{{.Alias}}')">Retirer</button>
         </div>
         {{else}}
@@ -109,8 +109,19 @@
             <input id="f-user" type="text" placeholder="cyril">
           </div>
           <div>
+            <label>Méthode d'authentification</label>
+            <select id="f-auth-method" onchange="toggleAuthMethod()">
+              <option value="api_key">Clé API</option>
+              <option value="password">Mot de passe</option>
+            </select>
+          </div>
+          <div id="f-key-wrap">
             <label>Clé API</label>
             <input id="f-key" type="password" placeholder="xxxxxxxxxxxxxxxx">
+          </div>
+          <div id="f-pass-wrap" style="display:none">
+            <label>Mot de passe</label>
+            <input id="f-pass" type="password" placeholder="••••••••">
           </div>
         </div>
         <div class="form-actions">
@@ -160,10 +171,18 @@
 </div>
 
 <script>
+function toggleAuthMethod() {
+  const isPass = document.getElementById('f-auth-method').value === 'password';
+  document.getElementById('f-key-wrap').style.display  = isPass ? 'none' : '';
+  document.getElementById('f-pass-wrap').style.display = isPass ? '' : 'none';
+}
+
 function toggleAddForm() {
   document.getElementById('f-editing-alias').value = '';
   document.getElementById('submit-btn').textContent = 'Ajouter';
   document.getElementById('f-alias').disabled = false;
+  document.getElementById('f-auth-method').value = 'api_key';
+  toggleAuthMethod();
   const f = document.getElementById('add-form');
   f.classList.toggle('open');
 }
@@ -173,29 +192,39 @@ function cancelForm() {
   document.getElementById('add-form').classList.remove('open');
 }
 
-function editServer(alias, url, type, username, apiKey) {
+function editServer(alias, url, type, username, apiKey, password) {
   document.getElementById('f-editing-alias').value = alias;
   document.getElementById('f-alias').value = alias;
-  document.getElementById('f-alias').disabled = true; // alias is the key, can't change it
+  document.getElementById('f-alias').disabled = true;
   document.getElementById('f-type').value = type;
   document.getElementById('f-url').value = url;
   document.getElementById('f-user').value = username;
-  document.getElementById('f-key').value = apiKey;
+  const method = password ? 'password' : 'api_key';
+  document.getElementById('f-auth-method').value = method;
+  document.getElementById('f-key').value = apiKey || '';
+  document.getElementById('f-pass').value = password || '';
+  toggleAuthMethod();
   document.getElementById('submit-btn').textContent = 'Mettre à jour';
   document.getElementById('add-form').classList.add('open');
   document.getElementById('add-form').scrollIntoView({behavior:'smooth'});
 }
 
-async function submitServer() {
-  const editingAlias = document.getElementById('f-editing-alias').value;
-  const body = {
+function buildServerBody() {
+  const isPass = document.getElementById('f-auth-method').value === 'password';
+  return {
     alias:    document.getElementById('f-alias').value,
     type:     document.getElementById('f-type').value,
     url:      document.getElementById('f-url').value,
     username: document.getElementById('f-user').value,
-    api_key:  document.getElementById('f-key').value,
-    enabled:  true
+    api_key:  isPass ? '' : document.getElementById('f-key').value,
+    password: isPass ? document.getElementById('f-pass').value : '',
+    enabled:  true,
   };
+}
+
+async function submitServer() {
+  const editingAlias = document.getElementById('f-editing-alias').value;
+  const body = buildServerBody();
   const endpoint = editingAlias ? '/api/servers/update' : '/api/servers/add';
   const r = await fetch(endpoint, {method:'POST', body: JSON.stringify(body)});
   if (r.ok) { location.reload(); } else { showNotice('add-notice', 'Erreur lors de l\'enregistrement', true); }
@@ -209,11 +238,11 @@ async function removeServer(alias) {
   if (r.ok) { location.reload(); }
 }
 
-async function testServer(alias, url, type, username, apiKey) {
+async function testServer(alias, url, type, username, apiKey, password) {
   const dot = document.getElementById('dot-' + alias);
-  dot.className = 'status-dot'; // reset to grey while testing
+  dot.className = 'status-dot';
   try {
-    const r = await fetch('/api/servers/test', {method:'POST', body: JSON.stringify({alias, url, type, username, api_key: apiKey})});
+    const r = await fetch('/api/servers/test', {method:'POST', body: JSON.stringify({alias, url, type, username, api_key: apiKey, password})});
     const data = await r.json();
     const cls = {ok:'ok', auth_error:'warn', unreachable:'err'}[data.status] ?? 'err';
     dot.className = 'status-dot ' + cls;
@@ -225,13 +254,7 @@ async function testServer(alias, url, type, username, apiKey) {
 }
 
 async function testFormServer() {
-  const body = {
-    alias:    document.getElementById('f-alias').value,
-    type:     document.getElementById('f-type').value,
-    url:      document.getElementById('f-url').value,
-    username: document.getElementById('f-user').value,
-    api_key:  document.getElementById('f-key').value,
-  };
+  const body = buildServerBody();
   const n = document.getElementById('add-notice');
   n.style.display = 'inline';
   n.textContent = '⏳ Test en cours…';

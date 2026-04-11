@@ -1,6 +1,7 @@
 package jellyfin
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -35,15 +36,26 @@ func (c *Client) SetAuthHeader(header string) {
 
 func (c *Client) Connect(cfg config.ServerConfig) error {
 	c.baseURL = cfg.URL
-	c.apiKey = cfg.APIKey
 	c.authHeader = "X-MediaBrowser-Token"
 	c.http = &http.Client{Timeout: 15 * time.Second}
 
-	userID, err := c.resolveUserID(cfg.Username)
-	if err != nil {
-		return fmt.Errorf("jellyfin connect: %w", err)
+	if cfg.APIKey != "" {
+		c.apiKey = cfg.APIKey
+		userID, err := c.resolveUserID(cfg.Username)
+		if err != nil {
+			return fmt.Errorf("jellyfin connect: %w", err)
+		}
+		c.userID = userID
+	} else if cfg.Password != "" {
+		token, userID, err := c.authenticateByPassword(cfg.Username, cfg.Password)
+		if err != nil {
+			return fmt.Errorf("jellyfin connect: %w", err)
+		}
+		c.apiKey = token
+		c.userID = userID
+	} else {
+		return fmt.Errorf("jellyfin connect: no api_key or password provided")
 	}
-	c.userID = userID
 	return nil
 }
 
@@ -243,6 +255,42 @@ func (c *Client) get(path string, params url.Values) (*http.Response, error) {
 		return nil, fmt.Errorf("jellyfin %s → %d: %s", path, resp.StatusCode, body)
 	}
 	return resp, nil
+}
+
+// authenticateByPassword calls POST /Users/AuthenticateByName and returns (token, userID).
+func (c *Client) authenticateByPassword(username, password string) (string, string, error) {
+	body, _ := json.Marshal(map[string]string{"Username": username, "Pw": password})
+	req, err := http.NewRequest("POST", c.baseURL+"/Users/AuthenticateByName", bytes.NewReader(body))
+	if err != nil {
+		return "", "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Emby-Authorization",
+		`MediaBrowser Client="MediaFS", Device="MediaFS", DeviceId="mediafs-cli", Version="1.0"`)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		b, _ := io.ReadAll(resp.Body)
+		return "", "", fmt.Errorf("auth failed (%d): %s", resp.StatusCode, b)
+	}
+
+	var result struct {
+		AccessToken string `json:"AccessToken"`
+		User        struct {
+			ID string `json:"Id"`
+		} `json:"User"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", "", err
+	}
+	if result.AccessToken == "" {
+		return "", "", fmt.Errorf("empty access token in response")
+	}
+	return result.AccessToken, result.User.ID, nil
 }
 
 func (c *Client) resolveUserID(username string) (string, error) {

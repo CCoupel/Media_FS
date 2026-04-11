@@ -17,12 +17,13 @@ const (
 )
 
 type ServerConfig struct {
-	Alias   string        `yaml:"alias"`
-	Type    ConnectorType `yaml:"type"`
-	URL     string        `yaml:"url"`
-	Username string       `yaml:"username"`
-	APIKey  string        `yaml:"api_key"`
-	Enabled bool          `yaml:"enabled"`
+	Alias    string        `yaml:"alias"`
+	Type     ConnectorType `yaml:"type"`
+	URL      string        `yaml:"url"`
+	Username string        `yaml:"username"`
+	APIKey   string        `yaml:"api_key,omitempty"`
+	Password string        `yaml:"password,omitempty"`
+	Enabled  bool          `yaml:"enabled"`
 }
 
 type DownloadConfig struct {
