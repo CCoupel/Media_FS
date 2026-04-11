@@ -90,6 +90,42 @@ type MediaConnector interface {
 	GetFileSize(itemID string) (int64, error)
 }
 
+// ArtworkFilenames returns the virtual sidecar filenames for a given item type.
+// Each name is intended to be prefixed with the item's base name, e.g. "Inception-poster.jpg".
+func ArtworkFilenames(t ItemType) []string {
+	switch t {
+	case ItemTypeMovie:
+		return []string{"poster.jpg", "fanart.jpg"}
+	case ItemTypeSeries:
+		return []string{"poster.jpg", "fanart.jpg", "banner.jpg"}
+	case ItemTypeSeason:
+		return []string{"poster.jpg"}
+	case ItemTypeEpisode:
+		return []string{"thumb.jpg"}
+	case ItemTypeMusicAlbum:
+		return []string{"folder.jpg", "fanart.jpg"}
+	default:
+		return nil
+	}
+}
+
+// ArtworkTypeForFilename maps a sidecar filename to the ArtworkType used by the connector.
+// Returns false if the filename is not a known artwork sidecar.
+func ArtworkTypeForFilename(filename string) (ArtworkType, bool) {
+	switch filename {
+	case "poster.jpg", "folder.jpg":
+		return ArtworkPoster, true
+	case "fanart.jpg":
+		return ArtworkFanart, true
+	case "thumb.jpg":
+		return ArtworkThumb, true
+	case "banner.jpg":
+		return ArtworkBanner, true
+	default:
+		return "", false
+	}
+}
+
 // Factory is a function that creates a new connector instance.
 type Factory func() MediaConnector
 
