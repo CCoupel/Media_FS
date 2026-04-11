@@ -89,6 +89,20 @@ func (fs *MediaFS) Getattr(path string, stat *fuse.Stat_t, fh uint64) int {
 		}
 		stat.Mode = fuse.S_IFDIR | 0555
 		return 0
+	case 2: // "user@server/LibraryName" folder
+		fs.mu.RLock()
+		srv, ok := fs.servers[parts[0]]
+		fs.mu.RUnlock()
+		if !ok {
+			return -fuse.ENOENT
+		}
+		for _, lib := range srv.Libraries {
+			if lib.Name == parts[1] {
+				stat.Mode = fuse.S_IFDIR | 0555
+				return 0
+			}
+		}
+		return -fuse.ENOENT
 	}
 
 	// Virtual .nfo sidecar: check before general resolution
