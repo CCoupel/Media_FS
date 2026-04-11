@@ -45,6 +45,9 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libfuse3-dev
 
       - name: go vet
+        env:
+          CGO_ENABLED: '1'
+          CGO_CFLAGS: '-I/usr/include/fuse3'
         run: go vet ./...
 
 # ─── build (parallel) ─────────────────────────────────────────────────────────
