@@ -48,7 +48,9 @@ type fileHandle struct {
 	streamURL  string
 	fileSize   int64
 	serverKey  string
-	nfoContent []byte // non-nil: virtual .nfo file; serve from slice, no HTTP call
+	nfoContent []byte // non-nil: virtual .nfo/.artwork file; served from memory
+	path       string
+	reader     *downloader.ReadAheadReader // nil for small/virtual files
 }
 
 // New creates a MediaFS instance.
@@ -315,6 +317,14 @@ func (fs *MediaFS) Open(path string, flags int) (int, uint64) {
 		return -fuse.EIO, ^uint64(0)
 	}
 
+	var reader *downloader.ReadAheadReader
+	if item.FileSize > 0 && fs.dl.ReadAheadWindows > 0 {
+		reader = downloader.NewReadAheadReader(
+			streamURL, nil, item.FileSize, fs.dl,
+			fs.dl.ReadAheadWindowMB, fs.dl.ReadAheadWindows,
+		)
+	}
+
 	fs.handlesMu.Lock()
 	fh := fs.nextFH
 	fs.nextFH++
@@ -322,6 +332,8 @@ func (fs *MediaFS) Open(path string, flags int) (int, uint64) {
 		streamURL: streamURL,
 		fileSize:  item.FileSize,
 		serverKey: parts[0],
+		path:      path,
+		reader:    reader,
 	}
 	fs.handlesMu.Unlock()
 
@@ -352,19 +364,72 @@ func (fs *MediaFS) Read(path string, buf []byte, ofst int64, fh uint64) int {
 		return 0
 	}
 
+	if h.reader != nil {
+		n, err := h.reader.ReadAt(buf[:length], ofst)
+		if err != nil {
+			return -fuse.EIO
+		}
+		return n
+	}
+
 	data, err := fs.dl.ReadAt(h.streamURL, nil, ofst, length)
 	if err != nil {
 		return -fuse.EIO
 	}
-
 	return copy(buf, data)
 }
 
 func (fs *MediaFS) Release(path string, fh uint64) int {
 	fs.handlesMu.Lock()
+	if h, ok := fs.handles[fh]; ok && h.reader != nil {
+		h.reader.Close()
+	}
 	delete(fs.handles, fh)
 	fs.handlesMu.Unlock()
 	return 0
+}
+
+// OpenFiles returns the status of all open media files (for monitoring).
+func (fs *MediaFS) OpenFiles() []downloader.FileStatus {
+	fs.handlesMu.Lock()
+	defer fs.handlesMu.Unlock()
+	var result []downloader.FileStatus
+	for fh, h := range fs.handles {
+		if h.reader == nil {
+			continue
+		}
+		result = append(result, downloader.FileStatus{
+			FH:         fh,
+			Path:       h.path,
+			FileSize:   h.fileSize,
+			WindowSize: h.reader.WindowSize(),
+			Windows:    h.reader.Status(),
+		})
+	}
+	return result
+}
+
+// PurgeFile drops all prefetch windows for a file handle.
+func (fs *MediaFS) PurgeFile(fh uint64) bool {
+	fs.handlesMu.Lock()
+	h, ok := fs.handles[fh]
+	fs.handlesMu.Unlock()
+	if !ok || h.reader == nil {
+		return false
+	}
+	h.reader.PurgeAll()
+	return true
+}
+
+// PurgeWindow drops one prefetch window for a file handle.
+func (fs *MediaFS) PurgeWindow(fh uint64, start int64) bool {
+	fs.handlesMu.Lock()
+	h, ok := fs.handles[fh]
+	fs.handlesMu.Unlock()
+	if !ok || h.reader == nil {
+		return false
+	}
+	return h.reader.PurgeWindow(start)
 }
 
 // Write operations are rejected — read-only filesystem.

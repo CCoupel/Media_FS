@@ -16,6 +16,7 @@ import (
 	"github.com/CCoupel/Media_FS/internal/connector"
 	_ "github.com/CCoupel/Media_FS/internal/connector/emby"
 	_ "github.com/CCoupel/Media_FS/internal/connector/jellyfin"
+	"github.com/CCoupel/Media_FS/internal/downloader"
 )
 
 //go:embed templates/*
@@ -23,11 +24,37 @@ var templateFS embed.FS
 
 // Server is the local HTTP config server.
 type Server struct {
-	cfg      *config.Config
-	onSave   func(*config.Config) error // called when the user saves config
-	listener net.Listener
-	port     int
-	tmpl     *template.Template
+	cfg         *config.Config
+	onSave      func(*config.Config) error // called when the user saves config
+	listener    net.Listener
+	port        int
+	tmpl        *template.Template
+	getMonitor    func() []downloader.FileStatus
+	getCacheStats func() downloader.CacheStats
+	getAllWindows  func() []downloader.WindowStatus
+	purgeCache    func(float64) int
+	purgeFile     func(uint64) bool
+	purgeWindow   func(uint64, int64) bool
+}
+
+// SetCachePurge wires up the global cache purge callback.
+func (s *Server) SetCachePurge(fn func(float64) int) {
+	s.purgeCache = fn
+}
+
+// SetMonitor wires up the VFS monitoring callbacks.
+func (s *Server) SetMonitor(
+	getFiles func() []downloader.FileStatus,
+	purgeFile func(uint64) bool,
+	purgeWindow func(uint64, int64) bool,
+	getCacheStats func() downloader.CacheStats,
+	getAllWindows func() []downloader.WindowStatus,
+) {
+	s.getMonitor = getFiles
+	s.purgeFile = purgeFile
+	s.purgeWindow = purgeWindow
+	s.getCacheStats = getCacheStats
+	s.getAllWindows = getAllWindows
 }
 
 // New creates a config server. onSave is called (with the new config) when
@@ -65,6 +92,10 @@ func (s *Server) Start() {
 	mux.HandleFunc("/api/servers/remove", s.handleRemoveServer)
 	mux.HandleFunc("/api/servers/test", s.handleTestServer)
 	mux.HandleFunc("/api/save", s.handleSave)
+	mux.HandleFunc("/api/monitor", s.handleMonitor)
+	mux.HandleFunc("/api/monitor/purge-cache", s.handlePurgeCache)
+	mux.HandleFunc("/api/monitor/purge-file", s.handlePurgeFile)
+	mux.HandleFunc("/api/monitor/purge-window", s.handlePurgeWindow)
 
 	go http.Serve(s.listener, mux) //nolint:errcheck
 }
@@ -205,12 +236,122 @@ func (s *Server) handleSave(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "POST required", 405)
 		return
 	}
+	// Optionally update general settings from the form body
+	var settings struct {
+		DriveLetter       string `json:"drive_letter"`
+		MountPoint        string `json:"mount_point"`
+		ParallelChunks    int    `json:"parallel_chunks"`
+		ChunkSizeMB       int    `json:"chunk_size_mb"`
+		ReadAheadWindowMB int    `json:"read_ahead_window_mb"`
+		ReadAheadWindows  int    `json:"read_ahead_windows"`
+		MaxCacheMB        int    `json:"max_cache_mb"`
+		CacheTTLMin       int    `json:"cache_ttl_min"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&settings); err == nil {
+		if settings.DriveLetter != "" {
+			s.cfg.Mount.DriveLetter = settings.DriveLetter
+		}
+		if settings.MountPoint != "" {
+			s.cfg.Mount.MountPoint = settings.MountPoint
+		}
+		if settings.ParallelChunks > 0 {
+			s.cfg.Download.ParallelChunks = settings.ParallelChunks
+		}
+		if settings.ChunkSizeMB > 0 {
+			s.cfg.Download.ChunkSizeMB = settings.ChunkSizeMB
+		}
+		if settings.ReadAheadWindowMB > 0 {
+			s.cfg.Download.ReadAheadWindowMB = settings.ReadAheadWindowMB
+		}
+		if settings.ReadAheadWindows > 0 {
+			s.cfg.Download.ReadAheadWindows = settings.ReadAheadWindows
+		}
+		if settings.MaxCacheMB > 0 {
+			s.cfg.Download.MaxCacheMB = settings.MaxCacheMB
+		}
+		if settings.CacheTTLMin > 0 {
+			s.cfg.Download.CacheTTLMin = settings.CacheTTLMin
+		}
+	}
 	if err := s.onSave(s.cfg); err != nil {
 		jsonError(w, err.Error())
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "saved"})
+}
+
+func (s *Server) handleMonitor(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	var data downloader.MonitorData
+	if s.getMonitor != nil {
+		data.Files = s.getMonitor()
+	}
+	if s.getCacheStats != nil {
+		data.Cache = s.getCacheStats()
+	}
+	if s.getAllWindows != nil {
+		data.AllWindows = s.getAllWindows()
+	}
+	data.HeapInuseMB = downloader.HeapStats()
+	json.NewEncoder(w).Encode(data)
+}
+
+func (s *Server) handlePurgeCache(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST required", 405)
+		return
+	}
+	var body struct {
+		MinAgeFrac float64 `json:"min_age_frac"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	removed := 0
+	if s.purgeCache != nil {
+		removed = s.purgeCache(body.MinAgeFrac)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]int{"removed": removed})
+}
+
+func (s *Server) handlePurgeFile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST required", 405)
+		return
+	}
+	var body struct {
+		FH uint64 `json:"fh"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	if s.purgeFile != nil {
+		s.purgeFile(body.FH)
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) handlePurgeWindow(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST required", 405)
+		return
+	}
+	var body struct {
+		FH    uint64 `json:"fh"`
+		Start int64  `json:"start"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	if s.purgeWindow != nil {
+		s.purgeWindow(body.FH, body.Start)
+	}
+	w.WriteHeader(http.StatusOK)
 }
 
 func jsonError(w http.ResponseWriter, msg string) {

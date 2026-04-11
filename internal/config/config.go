@@ -27,9 +27,13 @@ type ServerConfig struct {
 }
 
 type DownloadConfig struct {
-	ParallelChunks int `yaml:"parallel_chunks"`
-	ChunkSizeMB    int `yaml:"chunk_size_mb"`
-	BufferSizeKB   int `yaml:"buffer_size_kb"`
+	ParallelChunks    int `yaml:"parallel_chunks"`
+	ChunkSizeMB       int `yaml:"chunk_size_mb"`
+	BufferSizeKB      int `yaml:"buffer_size_kb"`
+	ReadAheadWindowMB int `yaml:"read_ahead_window_mb"`
+	ReadAheadWindows  int `yaml:"read_ahead_windows"`
+	MaxCacheMB        int `yaml:"max_cache_mb"`
+	CacheTTLMin       int `yaml:"cache_ttl_min"`
 }
 
 type CacheConfig struct {
@@ -57,9 +61,13 @@ func DefaultConfig() *Config {
 			MountPoint:  "/mnt/mediafs",
 		},
 		Download: DownloadConfig{
-			ParallelChunks: 4,
-			ChunkSizeMB:    64,
-			BufferSizeKB:   256,
+			ParallelChunks:    4,
+			ChunkSizeMB:       64,
+			BufferSizeKB:      256,
+			ReadAheadWindowMB: 64,
+			ReadAheadWindows:  2,
+			MaxCacheMB:        2048,
+			CacheTTLMin:       120,
 		},
 		Cache: CacheConfig{
 			TTLItemsSec:   300,

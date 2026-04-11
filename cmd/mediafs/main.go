@@ -48,21 +48,33 @@ func runTray() {
 	defer cacheInst.Close()
 
 	dl := &downloader.Downloader{
-		ParallelChunks: cfg.Download.ParallelChunks,
-		ChunkSizeMB:    cfg.Download.ChunkSizeMB,
-		BufferSizeKB:   cfg.Download.BufferSizeKB,
-		HTTPClient:     &http.Client{Timeout: 0}, // no timeout for streaming
+		ParallelChunks:    cfg.Download.ParallelChunks,
+		ChunkSizeMB:       cfg.Download.ChunkSizeMB,
+		BufferSizeKB:      cfg.Download.BufferSizeKB,
+		ReadAheadWindowMB: cfg.Download.ReadAheadWindowMB,
+		ReadAheadWindows:  cfg.Download.ReadAheadWindows,
+		MaxCacheMB:        cfg.Download.MaxCacheMB,
+		CacheTTLMin:       cfg.Download.CacheTTLMin,
+		HTTPClient:        &http.Client{Timeout: 0}, // no timeout for streaming
 	}
+	dl.Init()
+	defer dl.WindowCache.Close()
 
 	fs := vfs.New(cacheInst, dl)
 
 	// Start web config UI
 	webSrv, err := webui.New(cfg, func(newCfg *config.Config) error {
+		dl.WindowCache.SetLimits(
+			int64(newCfg.Download.MaxCacheMB)*1024*1024,
+			time.Duration(newCfg.Download.CacheTTLMin)*time.Minute,
+		)
 		return newCfg.Save()
 	})
 	if err != nil {
 		log.Printf("webui: %v (config UI unavailable)", err)
 	} else {
+		webSrv.SetMonitor(fs.OpenFiles, fs.PurgeFile, fs.PurgeWindow, dl.WindowCache.Stats, dl.WindowCache.AllStatus)
+		webSrv.SetCachePurge(dl.WindowCache.PurgeByAge)
 		webSrv.Start()
 	}
 
@@ -212,11 +224,17 @@ func runMount(keys []string) {
 	defer cacheInst.Close()
 
 	dl := &downloader.Downloader{
-		ParallelChunks: cfg.Download.ParallelChunks,
-		ChunkSizeMB:    cfg.Download.ChunkSizeMB,
-		BufferSizeKB:   cfg.Download.BufferSizeKB,
-		HTTPClient:     &http.Client{Timeout: 0},
+		ParallelChunks:    cfg.Download.ParallelChunks,
+		ChunkSizeMB:       cfg.Download.ChunkSizeMB,
+		BufferSizeKB:      cfg.Download.BufferSizeKB,
+		ReadAheadWindowMB: cfg.Download.ReadAheadWindowMB,
+		ReadAheadWindows:  cfg.Download.ReadAheadWindows,
+		MaxCacheMB:        cfg.Download.MaxCacheMB,
+		CacheTTLMin:       cfg.Download.CacheTTLMin,
+		HTTPClient:        &http.Client{Timeout: 0},
 	}
+	dl.Init()
+	defer dl.WindowCache.Close()
 
 	fs := vfs.New(cacheInst, dl)
 

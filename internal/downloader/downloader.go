@@ -5,14 +5,30 @@ import (
 	"io"
 	"net/http"
 	"sync"
+	"time"
+
+	"golang.org/x/sync/singleflight"
 )
 
 // Downloader fetches a remote file in parallel chunks via HTTP Range requests.
 type Downloader struct {
-	ParallelChunks int
-	ChunkSizeMB    int
-	BufferSizeKB   int
-	HTTPClient     *http.Client
+	ParallelChunks    int
+	ChunkSizeMB       int
+	BufferSizeKB      int
+	ReadAheadWindowMB int
+	ReadAheadWindows  int
+	MaxCacheMB        int
+	CacheTTLMin       int
+	HTTPClient        *http.Client
+	WindowCache       *WindowCache       // initialised by Init()
+	sf                singleflight.Group // deduplicates concurrent identical chunk fetches
+}
+
+// Init creates the WindowCache. Must be called once after all fields are set.
+func (d *Downloader) Init() {
+	maxBytes := int64(d.MaxCacheMB) * 1024 * 1024
+	ttl := time.Duration(d.CacheTTLMin) * time.Minute
+	d.WindowCache = newWindowCache(d, maxBytes, ttl)
 }
 
 type chunk struct {
@@ -72,6 +88,23 @@ func (d *Downloader) ReadAt(url string, headers map[string]string, offset, lengt
 }
 
 func (d *Downloader) fetchChunk(url string, start, end int64, headers map[string]string) ([]byte, error) {
+	// Deduplicate concurrent requests for the exact same byte range.
+	// Key includes headers that affect the response (e.g. auth tokens via URL params).
+	key := fmt.Sprintf("%s|%d-%d", url, start, end)
+	v, err, _ := d.sf.Do(key, func() (interface{}, error) {
+		return d.doFetch(url, start, end, headers)
+	})
+	if err != nil {
+		return nil, err
+	}
+	// Return a copy so callers can't mutate the shared slice.
+	src := v.([]byte)
+	out := make([]byte, len(src))
+	copy(out, src)
+	return out, nil
+}
+
+func (d *Downloader) doFetch(url string, start, end int64, headers map[string]string) ([]byte, error) {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
@@ -91,8 +124,12 @@ func (d *Downloader) fetchChunk(url string, start, end int64, headers map[string
 		return nil, fmt.Errorf("unexpected status %d", resp.StatusCode)
 	}
 
+	bufSize := d.BufferSizeKB * 1024
+	if bufSize <= 0 {
+		bufSize = 256 * 1024
+	}
 	buf := make([]byte, 0, end-start+1)
-	tmp := make([]byte, d.BufferSizeKB*1024)
+	tmp := make([]byte, bufSize)
 	for {
 		n, err := resp.Body.Read(tmp)
 		buf = append(buf, tmp[:n]...)

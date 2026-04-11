@@ -10,6 +10,10 @@
     header { background: #1a1d2e; border-bottom: 1px solid #2d3748; padding: 1rem 2rem; display: flex; align-items: center; gap: .75rem; }
     header h1 { font-size: 1.2rem; font-weight: 600; letter-spacing: .02em; }
     header .badge { font-size: .7rem; background: #3b82f6; color: #fff; padding: .15rem .5rem; border-radius: 999px; }
+    .tab-bar { display: flex; gap: 0; padding: 0 2rem; background: #1a1d2e; border-bottom: 1px solid #2d3748; }
+    .tab-btn { background: none; border: none; color: #64748b; padding: .75rem 1.25rem; font-size: .88rem; font-weight: 500; cursor: pointer; border-bottom: 2px solid transparent; transition: color .15s, border-color .15s; }
+    .tab-btn:hover { color: #e2e8f0; }
+    .tab-btn.active { color: #3b82f6; border-bottom-color: #3b82f6; }
     main { max-width: 900px; margin: 2rem auto; padding: 0 1.5rem; }
     section { margin-bottom: 2.5rem; }
     h2 { font-size: .85rem; text-transform: uppercase; letter-spacing: .08em; color: #94a3b8; margin-bottom: 1rem; }
@@ -48,6 +52,30 @@
     /* General settings */
     .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; padding: 1.25rem; }
     .save-bar { position: sticky; bottom: 0; background: #1a1d2e; border-top: 1px solid #2d3748; padding: .75rem 1.5rem; display: flex; justify-content: flex-end; gap: .75rem; }
+
+    /* Monitor tab */
+    .file-block { border-bottom: 1px solid #2d3748; padding: 1rem 1.25rem; }
+    .file-block:last-child { border-bottom: none; }
+    .file-header { display: flex; align-items: center; gap: .75rem; margin-bottom: .5rem; }
+    .file-path { font-size: .85rem; font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .file-size { font-size: .75rem; color: #64748b; white-space: nowrap; }
+    .window-row { display: flex; align-items: center; gap: .75rem; padding: .3rem 0; }
+    .window-range { font-size: .78rem; color: #94a3b8; min-width: 180px; font-variant-numeric: tabular-nums; }
+    .window-state { font-size: .72rem; font-weight: 600; padding: .15rem .5rem; border-radius: 999px; }
+    .state-ready    { background: #14532d; color: #86efac; }
+    .state-fetching { background: #1e3a5f; color: #93c5fd; }
+    .state-error    { background: #450a0a; color: #fca5a5; }
+    .window-error { font-size: .75rem; color: #f87171; flex: 1; overflow: hidden; text-overflow: ellipsis; }
+    .monitor-empty { padding: 2rem; text-align: center; color: #475569; font-size: .85rem; }
+    .monitor-bar { display: flex; align-items: center; gap: .75rem; margin-bottom: 1rem; }
+    .auto-badge { font-size: .72rem; background: #14532d; color: #86efac; padding: .15rem .5rem; border-radius: 999px; }
+    /* Chunk bar */
+    .chunk-bar { position: relative; height: 10px; background: #1e2433; border-radius: 4px; overflow: hidden; margin: .5rem 0 .25rem; }
+    /* Memory stats */
+    .mem-stats { display: flex; flex-wrap: wrap; gap: 1rem; padding: .9rem 1.25rem; border-bottom: 1px solid #2d3748; }
+    .mem-item { display: flex; flex-direction: column; gap: .15rem; }
+    .mem-label { font-size: .72rem; color: #64748b; text-transform: uppercase; letter-spacing: .05em; }
+    .mem-value { font-size: .95rem; font-weight: 600; font-variant-numeric: tabular-nums; color: #e2e8f0; }
   </style>
 </head>
 <body>
@@ -58,7 +86,15 @@
   <span class="badge">Configuration</span>
 </header>
 
+<div class="tab-bar">
+  <button class="tab-btn active" id="tab-btn-config" onclick="showTab('config', event)">Configuration</button>
+  <button class="tab-btn" id="tab-btn-monitor" onclick="showTab('monitor', event)">Activité</button>
+</div>
+
 <main>
+
+<!-- ===== CONFIGURATION TAB ===== -->
+<div id="tab-config">
 
   <!-- Servers -->
   <section>
@@ -84,7 +120,7 @@
         {{end}}
       </div>
 
-      <!-- Add form -->
+      <!-- Add/edit form -->
       <div id="add-form" class="add-form">
         <input type="hidden" id="f-editing-alias" value="">
         <div class="form-grid">
@@ -159,18 +195,269 @@
           <label>Taille chunk (MB)</label>
           <input id="s-chunksize" type="number" min="8" max="512" value="{{.Download.ChunkSizeMB}}">
         </div>
+        <div>
+          <label>Taille fenêtre pré-chargement (MB)</label>
+          <input id="s-winsize" type="number" min="8" max="512" value="{{.Download.ReadAheadWindowMB}}">
+        </div>
+        <div>
+          <label>Fenêtres en mémoire (read-ahead)</label>
+          <input id="s-wincount" type="number" min="1" max="8" value="{{.Download.ReadAheadWindows}}">
+        </div>
       </div>
     </div>
   </section>
 
+  <!-- Cache settings -->
+  <section>
+    <h2>Cache partagé</h2>
+    <div class="card">
+      <div class="settings-grid">
+        <div>
+          <label>Taille max cache (MB)</label>
+          <input id="s-maxcache" type="number" min="256" max="16384" value="{{.Download.MaxCacheMB}}">
+        </div>
+        <div>
+          <label>TTL cache (min)</label>
+          <input id="s-cachettl" type="number" min="5" max="1440" value="{{.Download.CacheTTLMin}}">
+        </div>
+      </div>
+    </div>
+  </section>
+
+</div><!-- /tab-config -->
+
+<!-- ===== MONITOR TAB ===== -->
+<div id="tab-monitor" style="display:none">
+  <section>
+    <h2>Mémoire</h2>
+    <div class="card">
+      <div class="mem-stats" id="mem-stats">
+        <div class="mem-item"><span class="mem-label">Heap Go</span><span class="mem-value">—</span></div>
+        <div class="mem-item"><span class="mem-label">Cache fenêtres</span><span class="mem-value">—</span></div>
+        <div class="mem-item"><span class="mem-label">Fenêtres</span><span class="mem-value">—</span></div>
+        <div class="mem-item"><span class="mem-label">TTL</span><span class="mem-value">—</span></div>
+      </div>
+      <div style="padding:.25rem 1.25rem .9rem">
+        <div style="font-size:.72rem;color:#64748b;margin-bottom:.35rem;text-transform:uppercase;letter-spacing:.05em">Âge des chunks (bleu=nouveau → rouge=ancien)</div>
+        <div class="chunk-bar" id="cache-age-bar" style="height:16px"></div>
+        <div style="display:flex;gap:.5rem;margin-top:.65rem;align-items:center">
+          <span style="font-size:.75rem;color:#64748b;margin-right:.25rem">Purger :</span>
+          <button class="btn btn-danger btn-sm" onclick="purgeCache(0)">Tout</button>
+          <button class="btn btn-ghost btn-sm" style="border-color:#f59e0b;color:#f59e0b" onclick="purgeCache(0.5)">Orange + Rouge</button>
+          <button class="btn btn-ghost btn-sm" style="border-color:#ef4444;color:#ef4444" onclick="purgeCache(0.9)">Rouge uniquement</button>
+          <span id="purge-cache-notice" style="font-size:.75rem;color:#22c55e;display:none"></span>
+        </div>
+      </div>
+    </div>
+  </section>
+  <section>
+    <div class="monitor-bar">
+      <h2 style="margin:0">Fichiers ouverts</h2>
+      <span class="auto-badge">auto-refresh 2s</span>
+      <button class="btn btn-ghost btn-sm" onclick="refreshMonitor()">Rafraîchir</button>
+    </div>
+    <div class="card" id="monitor-content"></div>
+  </section>
+</div>
+
 </main>
 
-<div class="save-bar">
+<div class="save-bar" id="save-bar">
   <span id="save-notice" class="notice"></span>
   <button class="btn btn-primary" onclick="saveConfig()">Enregistrer et appliquer</button>
 </div>
 
 <script>
+// ─── UTILITIES ────────────────────────────────────────────────────
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = String(s);
+  return d.innerHTML;
+}
+
+function el(tag, attrs, ...children) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === 'className') e.className = v;
+    else if (k === 'title') e.title = v;
+    else if (k === 'style') e.style.cssText = v;
+    else e.setAttribute(k, v);
+  }
+  for (const c of children) {
+    if (typeof c === 'string') e.appendChild(document.createTextNode(c));
+    else if (c) e.appendChild(c);
+  }
+  return e;
+}
+
+function formatBytes(b) {
+  if (b === undefined || b === null) return '?';
+  if (b < 1024) return b + ' B';
+  if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
+  if (b < 1073741824) return (b / 1048576).toFixed(1) + ' MB';
+  return (b / 1073741824).toFixed(2) + ' GB';
+}
+
+// ─── TAB NAVIGATION ───────────────────────────────────────────────
+let monitorInterval = null;
+
+function showTab(name, event) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  ['config', 'monitor'].forEach(t => {
+    document.getElementById('tab-' + t).style.display = t === name ? '' : 'none';
+  });
+  if (event) event.currentTarget.classList.add('active');
+  document.getElementById('save-bar').style.display = name === 'config' ? '' : 'none';
+  clearInterval(monitorInterval);
+  monitorInterval = null;
+  if (name === 'monitor') {
+    refreshMonitor();
+    monitorInterval = setInterval(refreshMonitor, 2000);
+  }
+}
+
+// ─── MONITOR ──────────────────────────────────────────────────────
+function updateMemStats(data) {
+  const cache = data.cache || {};
+  const ttlMin = cache.ttl_min || 0;
+  const items = [
+    ['Heap Go',        (data.heap_inuse_mb || 0) + ' MB'],
+    ['Cache fenêtres', (cache.data_mb || 0) + ' / ' + (cache.max_mb || 0) + ' MB'],
+    ['Fenêtres',       String(cache.count || 0)],
+    ['TTL',            ttlMin >= 60 ? (ttlMin / 60).toFixed(0) + ' h' : ttlMin + ' min'],
+  ];
+  const container = document.getElementById('mem-stats');
+  if (!container) return;
+  container.textContent = '';
+  for (const [label, value] of items) {
+    const item = el('div', {className: 'mem-item'});
+    item.appendChild(el('span', {className: 'mem-label'}, label));
+    item.appendChild(el('span', {className: 'mem-value'}, value));
+    container.appendChild(item);
+  }
+}
+
+// Returns a CSS color based on age fraction (0=new/blue → 1=old/red).
+function ageColor(frac) {
+  if (frac <= 0)   return '#3b82f6'; // blue  — brand new
+  if (frac < 0.1)  return '#3b82f6'; // blue  — ~100% TTL left
+  if (frac < 0.5)  return '#22c55e'; // green — >50% TTL left
+  if (frac < 0.9)  return '#f59e0b'; // orange — >10% TTL left
+  return '#ef4444';                   // red   — <10% TTL left
+}
+
+// Per-file chunk bar: windows positioned by byte offset within the file.
+function buildChunkBar(f, ttlSec) {
+  const bar = el('div', {className: 'chunk-bar'});
+  const windows = f.windows || [];
+  if (!f.file_size || !windows.length) return bar;
+  for (const w of windows) {
+    const size = w.end - w.start + 1;
+    const left  = (w.start / f.file_size) * 100;
+    const width = Math.max((size / f.file_size) * 100, 0.3);
+    let color;
+    if (w.state === 'fetching') {
+      color = '#3b82f6';
+    } else if (w.state === 'ready') {
+      color = ageColor(ttlSec > 0 ? w.last_access_ago_sec / ttlSec : 0);
+    } else {
+      color = '#ef4444';
+    }
+    bar.appendChild(el('div', {
+      style: 'position:absolute;top:0;bottom:0;left:' + left.toFixed(2) + '%;width:' + width.toFixed(2) + '%;background:' + color + ';border-radius:2px'
+    }));
+  }
+  return bar;
+}
+
+// Global cache age bar: all windows packed oldest-first (already sorted by AllStatus).
+function buildCacheBar(allWindows, cache) {
+  const bar = document.getElementById('cache-age-bar');
+  if (!bar) return;
+  bar.textContent = '';
+  if (!allWindows || !allWindows.length || !cache || !cache.max_mb) return;
+  const maxBytes = cache.max_mb * 1024 * 1024;
+  const ttlSec   = (cache.ttl_min || 120) * 60;
+  let offset = 0;
+  for (const w of allWindows) {
+    if (w.state !== 'ready') continue;
+    const size  = w.end - w.start + 1;
+    const left  = (offset / maxBytes) * 100;
+    const width = Math.max((size / maxBytes) * 100, 0.1);
+    const color = ageColor(ttlSec > 0 ? w.last_access_ago_sec / ttlSec : 0);
+    bar.appendChild(el('div', {
+      style: 'position:absolute;top:0;bottom:0;left:' + left.toFixed(3) + '%;width:' + width.toFixed(3) + '%;background:' + color + ';border-radius:1px'
+    }));
+    offset += size;
+  }
+}
+
+async function refreshMonitor() {
+  const container = document.getElementById('monitor-content');
+  try {
+    const r = await fetch('/api/monitor');
+    const data = await r.json();
+    updateMemStats(data);
+    buildCacheBar(data.all_windows, data.cache);
+    const files = data.files || [];
+    const ttlSec = (data.cache && data.cache.ttl_min) ? data.cache.ttl_min * 60 : 7200;
+    container.textContent = '';
+    if (files.length === 0) {
+      container.appendChild(el('div', {className: 'monitor-empty'}, 'Aucun fichier ouvert en ce moment.'));
+      return;
+    }
+    for (const f of files) {
+      const block = el('div', {className: 'file-block'});
+
+      // File header
+      const hdr = el('div', {className: 'file-header'});
+      hdr.appendChild(el('span', {className: 'file-path', title: f.path}, f.path));
+      hdr.appendChild(el('span', {className: 'file-size'}, formatBytes(f.file_size)));
+      const purgeAllBtn = el('button', {className: 'btn btn-danger btn-sm'}, 'Purger tout');
+      purgeAllBtn.onclick = () => purgeFile(f.fh);
+      hdr.appendChild(purgeAllBtn);
+      block.appendChild(hdr);
+
+      // Visual chunk bar
+      block.appendChild(buildChunkBar(f, ttlSec));
+
+      container.appendChild(block);
+    }
+  } catch (e) {
+    container.textContent = '';
+    container.appendChild(el('div', {className: 'monitor-empty', style: 'color:#f87171'}, 'Erreur : ' + e.message));
+  }
+}
+
+function fmtDuration(sec) {
+  if (sec >= 3600) return Math.floor(sec / 3600) + 'h ' + Math.floor((sec % 3600) / 60) + 'min';
+  if (sec >= 60)   return Math.floor(sec / 60) + ' min';
+  return sec + ' s';
+}
+
+async function purgeFile(fh) {
+  await fetch('/api/monitor/purge-file', {method: 'POST', body: JSON.stringify({fh})});
+  refreshMonitor();
+}
+
+async function purgeWindow(fh, start) {
+  await fetch('/api/monitor/purge-window', {method: 'POST', body: JSON.stringify({fh, start})});
+  refreshMonitor();
+}
+
+async function purgeCache(minAgeFrac) {
+  const r = await fetch('/api/monitor/purge-cache', {method: 'POST', body: JSON.stringify({min_age_frac: minAgeFrac})});
+  const notice = document.getElementById('purge-cache-notice');
+  if (r.ok) {
+    const data = await r.json();
+    notice.textContent = data.removed + ' fenêtre(s) purgée(s)';
+    notice.style.display = 'inline';
+    setTimeout(() => { notice.style.display = 'none'; }, 2500);
+  }
+  refreshMonitor();
+}
+
+// ─── SERVER FORM ──────────────────────────────────────────────────
 function toggleAuthMethod() {
   const isPass = document.getElementById('f-auth-method').value === 'password';
   document.getElementById('f-key-wrap').style.display  = isPass ? 'none' : '';
@@ -183,8 +470,7 @@ function toggleAddForm() {
   document.getElementById('f-alias').disabled = false;
   document.getElementById('f-auth-method').value = 'api_key';
   toggleAuthMethod();
-  const f = document.getElementById('add-form');
-  f.classList.toggle('open');
+  document.getElementById('add-form').classList.toggle('open');
 }
 
 function cancelForm() {
@@ -199,14 +485,13 @@ function editServer(alias, url, type, username, apiKey, password) {
   document.getElementById('f-type').value = type;
   document.getElementById('f-url').value = url;
   document.getElementById('f-user').value = username;
-  const method = password ? 'password' : 'api_key';
-  document.getElementById('f-auth-method').value = method;
+  document.getElementById('f-auth-method').value = password ? 'password' : 'api_key';
   document.getElementById('f-key').value = apiKey || '';
   document.getElementById('f-pass').value = password || '';
   toggleAuthMethod();
   document.getElementById('submit-btn').textContent = 'Mettre à jour';
   document.getElementById('add-form').classList.add('open');
-  document.getElementById('add-form').scrollIntoView({behavior:'smooth'});
+  document.getElementById('add-form').scrollIntoView({behavior: 'smooth'});
 }
 
 function buildServerBody() {
@@ -222,19 +507,25 @@ function buildServerBody() {
   };
 }
 
+function showNotice(id, msg, isError) {
+  const n = document.getElementById(id);
+  n.textContent = msg;
+  n.className = 'notice' + (isError ? ' error' : '');
+  n.style.display = 'inline';
+}
+
 async function submitServer() {
   const editingAlias = document.getElementById('f-editing-alias').value;
   const body = buildServerBody();
   const endpoint = editingAlias ? '/api/servers/update' : '/api/servers/add';
-  const r = await fetch(endpoint, {method:'POST', body: JSON.stringify(body)});
-  if (r.ok) { location.reload(); } else { showNotice('add-notice', 'Erreur lors de l\'enregistrement', true); }
+  const r = await fetch(endpoint, {method: 'POST', body: JSON.stringify(body)});
+  if (r.ok) { location.reload(); }
+  else { showNotice('add-notice', "Erreur lors de l'enregistrement", true); }
 }
-
-async function addServer() { await submitServer(); }
 
 async function removeServer(alias) {
   if (!confirm('Retirer ' + alias + ' ?')) return;
-  const r = await fetch('/api/servers/remove', {method:'POST', body: JSON.stringify({Alias: alias})});
+  const r = await fetch('/api/servers/remove', {method: 'POST', body: JSON.stringify({Alias: alias})});
   if (r.ok) { location.reload(); }
 }
 
@@ -242,25 +533,24 @@ async function testServer(alias, url, type, username, apiKey, password) {
   const dot = document.getElementById('dot-' + alias);
   dot.className = 'status-dot';
   try {
-    const r = await fetch('/api/servers/test', {method:'POST', body: JSON.stringify({alias, url, type, username, api_key: apiKey, password})});
+    const r = await fetch('/api/servers/test', {method: 'POST', body: JSON.stringify({alias, url, type, username, api_key: apiKey, password})});
     const data = await r.json();
-    const cls = {ok:'ok', auth_error:'warn', unreachable:'err'}[data.status] ?? 'err';
+    const cls = {ok: 'ok', auth_error: 'warn', unreachable: 'err'}[data.status] || 'err';
     dot.className = 'status-dot ' + cls;
     dot.title = data.message || '';
-  } catch(e) {
+  } catch (e) {
     dot.className = 'status-dot err';
     dot.title = e.message;
   }
 }
 
 async function testFormServer() {
-  const body = buildServerBody();
   const n = document.getElementById('add-notice');
   n.style.display = 'inline';
   n.textContent = '⏳ Test en cours…';
   n.className = 'notice';
   try {
-    const r = await fetch('/api/servers/test', {method:'POST', body: JSON.stringify(body)});
+    const r = await fetch('/api/servers/test', {method: 'POST', body: JSON.stringify(buildServerBody())});
     const data = await r.json();
     if (data.status === 'ok') {
       n.textContent = '✓ Connexion et authentification OK'; n.className = 'notice';
@@ -269,19 +559,35 @@ async function testFormServer() {
     } else {
       n.textContent = '✗ Serveur injoignable — ' + (data.message || ''); n.className = 'notice error';
     }
-  } catch(e) {
+  } catch (e) {
     n.textContent = '✗ Erreur réseau'; n.className = 'notice error';
   }
 }
 
+// ─── SAVE CONFIG ──────────────────────────────────────────────────
 async function saveConfig() {
-  const r = await fetch('/api/save', {method:'POST'});
+  const settings = {
+    drive_letter:         document.getElementById('s-drive').value,
+    mount_point:          document.getElementById('s-mount').value,
+    parallel_chunks:      parseInt(document.getElementById('s-chunks').value) || 0,
+    chunk_size_mb:        parseInt(document.getElementById('s-chunksize').value) || 0,
+    read_ahead_window_mb: parseInt(document.getElementById('s-winsize').value) || 0,
+    read_ahead_windows:   parseInt(document.getElementById('s-wincount').value) || 0,
+    max_cache_mb:         parseInt(document.getElementById('s-maxcache').value) || 0,
+    cache_ttl_min:        parseInt(document.getElementById('s-cachettl').value) || 0,
+  };
+  const r = await fetch('/api/save', {method: 'POST', body: JSON.stringify(settings)});
   const n = document.getElementById('save-notice');
   n.style.display = 'inline';
   if (r.ok) { n.textContent = '✓ Configuration enregistrée'; n.className = 'notice'; }
   else       { n.textContent = '✗ Erreur de sauvegarde'; n.className = 'notice error'; }
   setTimeout(() => { n.style.display = 'none'; }, 3000);
 }
+
+// Initialise monitor card with empty state on load
+document.getElementById('monitor-content').appendChild(
+  el('div', {className: 'monitor-empty'}, 'Aucun fichier ouvert en ce moment.')
+);
 </script>
 </body>
 </html>

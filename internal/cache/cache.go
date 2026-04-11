@@ -3,21 +3,31 @@ package cache
 import (
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
 )
 
-// Cache stores metadata, item listings, and artwork with per-type TTLs.
+// memEntry is one in-memory cache entry.
+type memEntry struct {
+	data      []byte
+	expiresAt int64 // Unix seconds
+}
+
+// Cache stores:
+//   - items and metadata: pure in-memory (sync.Map) — fast, no persistence needed
+//   - artwork: SQLite on disk — large blobs worth persisting across restarts
 type Cache struct {
-	db             *sql.DB
-	ttlItems       time.Duration
-	ttlMetadata    time.Duration
-	ttlArtwork     time.Duration
+	db          *sql.DB
+	ttlItems    time.Duration
+	ttlMetadata time.Duration
+	ttlArtwork  time.Duration
+	memItems    sync.Map // key: serverKey+"\x00"+parentID → memEntry
+	memMeta     sync.Map // key: serverKey+"\x00"+itemID   → memEntry
 }
 
 func cacheDir() string {
@@ -28,7 +38,7 @@ func cacheDir() string {
 	return filepath.Join(home, ".cache", "mediafs")
 }
 
-// Open opens (or creates) the cache database.
+// Open opens (or creates) the cache database (artwork only).
 func Open(ttlItems, ttlMetadata, ttlArtwork time.Duration) (*Cache, error) {
 	dir := cacheDir()
 	if err := os.MkdirAll(dir, 0700); err != nil {
@@ -39,7 +49,7 @@ func Open(ttlItems, ttlMetadata, ttlArtwork time.Duration) (*Cache, error) {
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(1) // SQLite is single-writer
+	db.SetMaxOpenConns(1)
 
 	c := &Cache{
 		db:          db,
@@ -52,20 +62,6 @@ func Open(ttlItems, ttlMetadata, ttlArtwork time.Duration) (*Cache, error) {
 
 func (c *Cache) migrate() error {
 	_, err := c.db.Exec(`
-		CREATE TABLE IF NOT EXISTS items (
-			server_key TEXT NOT NULL,
-			parent_id  TEXT NOT NULL,
-			data       TEXT NOT NULL,
-			expires_at INTEGER NOT NULL,
-			PRIMARY KEY (server_key, parent_id)
-		);
-		CREATE TABLE IF NOT EXISTS metadata (
-			server_key TEXT NOT NULL,
-			item_id    TEXT NOT NULL,
-			data       TEXT NOT NULL,
-			expires_at INTEGER NOT NULL,
-			PRIMARY KEY (server_key, item_id)
-		);
 		CREATE TABLE IF NOT EXISTS artwork (
 			server_key TEXT NOT NULL,
 			item_id    TEXT NOT NULL,
@@ -78,20 +74,19 @@ func (c *Cache) migrate() error {
 	return err
 }
 
-// --- Items ---
+// --- Items (in-memory only) ---
 
 func (c *Cache) GetItems(serverKey, parentID string, dest interface{}) (bool, error) {
-	row := c.db.QueryRow(
-		`SELECT data FROM items WHERE server_key=? AND parent_id=? AND expires_at>?`,
-		serverKey, parentID, time.Now().Unix(),
-	)
-	var raw string
-	if err := row.Scan(&raw); err == sql.ErrNoRows {
-		return false, nil
-	} else if err != nil {
-		return false, err
+	key := serverKey + "\x00" + parentID
+	now := time.Now().Unix()
+	if v, ok := c.memItems.Load(key); ok {
+		e := v.(memEntry)
+		if e.expiresAt > now {
+			return true, json.Unmarshal(e.data, dest)
+		}
+		c.memItems.Delete(key)
 	}
-	return true, json.Unmarshal([]byte(raw), dest)
+	return false, nil
 }
 
 func (c *Cache) StoreItems(serverKey, parentID string, items interface{}) error {
@@ -99,27 +94,24 @@ func (c *Cache) StoreItems(serverKey, parentID string, items interface{}) error 
 	if err != nil {
 		return err
 	}
-	_, err = c.db.Exec(
-		`INSERT OR REPLACE INTO items (server_key, parent_id, data, expires_at) VALUES (?,?,?,?)`,
-		serverKey, parentID, string(data), time.Now().Add(c.ttlItems).Unix(),
-	)
-	return err
+	key := serverKey + "\x00" + parentID
+	c.memItems.Store(key, memEntry{data: data, expiresAt: time.Now().Add(c.ttlItems).Unix()})
+	return nil
 }
 
-// --- Metadata ---
+// --- Metadata (in-memory only) ---
 
 func (c *Cache) GetMetadata(serverKey, itemID string, dest interface{}) (bool, error) {
-	row := c.db.QueryRow(
-		`SELECT data FROM metadata WHERE server_key=? AND item_id=? AND expires_at>?`,
-		serverKey, itemID, time.Now().Unix(),
-	)
-	var raw string
-	if err := row.Scan(&raw); err == sql.ErrNoRows {
-		return false, nil
-	} else if err != nil {
-		return false, err
+	key := serverKey + "\x00" + itemID
+	now := time.Now().Unix()
+	if v, ok := c.memMeta.Load(key); ok {
+		e := v.(memEntry)
+		if e.expiresAt > now {
+			return true, json.Unmarshal(e.data, dest)
+		}
+		c.memMeta.Delete(key)
 	}
-	return true, json.Unmarshal([]byte(raw), dest)
+	return false, nil
 }
 
 func (c *Cache) StoreMetadata(serverKey, itemID string, meta interface{}) error {
@@ -127,14 +119,12 @@ func (c *Cache) StoreMetadata(serverKey, itemID string, meta interface{}) error 
 	if err != nil {
 		return err
 	}
-	_, err = c.db.Exec(
-		`INSERT OR REPLACE INTO metadata (server_key, item_id, data, expires_at) VALUES (?,?,?,?)`,
-		serverKey, itemID, string(data), time.Now().Add(c.ttlMetadata).Unix(),
-	)
-	return err
+	key := serverKey + "\x00" + itemID
+	c.memMeta.Store(key, memEntry{data: data, expiresAt: time.Now().Add(c.ttlMetadata).Unix()})
+	return nil
 }
 
-// --- Artwork ---
+// --- Artwork (SQLite — persisted across restarts) ---
 
 func (c *Cache) GetArtwork(serverKey, itemID, artType string) ([]byte, bool, error) {
 	row := c.db.QueryRow(
@@ -160,14 +150,31 @@ func (c *Cache) StoreArtwork(serverKey, itemID, artType string, data []byte) err
 
 // Invalidate removes all cached entries for a given server.
 func (c *Cache) Invalidate(serverKey string) error {
-	for _, table := range []string{"items", "metadata", "artwork"} {
-		if _, err := c.db.Exec(fmt.Sprintf(`DELETE FROM %s WHERE server_key=?`, table), serverKey); err != nil {
-			return err
-		}
+	prefix := serverKey + "\x00"
+	for _, m := range []*sync.Map{&c.memItems, &c.memMeta} {
+		m.Range(func(k, _ interface{}) bool {
+			if s, ok := k.(string); ok && len(s) > len(prefix) && s[:len(prefix)] == prefix {
+				m.Delete(k)
+			}
+			return true
+		})
 	}
-	return nil
+	_, err := c.db.Exec(`DELETE FROM artwork WHERE server_key=?`, serverKey)
+	return err
+}
+
+// InvalidateItems drops only the item listings for a server (e.g. after library refresh).
+func (c *Cache) InvalidateItems(serverKey string) {
+	prefix := serverKey + "\x00"
+	c.memItems.Range(func(k, _ interface{}) bool {
+		if s, ok := k.(string); ok && len(s) > len(prefix) && s[:len(prefix)] == prefix {
+			c.memItems.Delete(k)
+		}
+		return true
+	})
 }
 
 func (c *Cache) Close() error {
 	return c.db.Close()
 }
+
