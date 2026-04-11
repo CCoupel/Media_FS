@@ -38,7 +38,9 @@ func (c *Client) SetAuthHeader(header string) {
 
 func (c *Client) Connect(cfg config.ServerConfig) error {
 	c.baseURL = cfg.URL
-	c.authHeader = "X-MediaBrowser-Token"
+	if c.authHeader == "" {
+		c.authHeader = "X-MediaBrowser-Token" // Emby overrides this before calling Connect
+	}
 	c.http = &http.Client{Timeout: 15 * time.Second}
 
 	if cfg.APIKey != "" {
