@@ -76,7 +76,7 @@ func runTray() {
 		OnRefresh:    func(key string) { cacheInst.Invalidate(key) },
 		OnOpenConfig: func() {
 			if webSrv != nil {
-				openBrowser(webSrv.URL())
+				openConfigPopup(webSrv.URL())
 			}
 		},
 		OnQuit: func() { os.Exit(0) },
@@ -308,4 +308,28 @@ func openBrowser(url string) {
 		cmd = exec.Command("xdg-open", url)
 	}
 	_ = cmd.Start()
+}
+
+// openConfigPopup opens the config UI as a minimal popup window using Edge app mode.
+// Falls back to the system browser if Edge is not found.
+func openConfigPopup(url string) {
+	if runtime.GOOS == "windows" {
+		edgePaths := []string{
+			`C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`,
+			`C:\Program Files\Microsoft\Edge\Application\msedge.exe`,
+		}
+		for _, path := range edgePaths {
+			if _, err := os.Stat(path); err == nil {
+				cmd := exec.Command(path,
+					"--app="+url,
+					"--window-size=980,760",
+					"--window-position=80,60",
+				)
+				if cmd.Start() == nil {
+					return
+				}
+			}
+		}
+	}
+	openBrowser(url)
 }

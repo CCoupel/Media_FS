@@ -2,6 +2,7 @@ package tray
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"image"
 	"image/color"
@@ -164,7 +165,29 @@ func generateDefaultIcon() []byte {
 			img.Set(x, y, col)
 		}
 	}
-	var buf bytes.Buffer
-	_ = png.Encode(&buf, img)
-	return buf.Bytes()
+	var pngBuf bytes.Buffer
+	_ = png.Encode(&pngBuf, img)
+	return wrapInICO(pngBuf.Bytes(), 16)
+}
+
+// wrapInICO wraps PNG bytes into a minimal ICO container (Vista+ PNG-in-ICO format).
+// fyne.io/systray on Windows requires ICO format; PNG embedded in ICO is supported
+// on Windows Vista and later via CreateIconFromResourceEx.
+func wrapInICO(pngData []byte, size int) []byte {
+	buf := make([]byte, 22+len(pngData))
+	// ICO header
+	binary.LittleEndian.PutUint16(buf[0:], 0) // reserved
+	binary.LittleEndian.PutUint16(buf[2:], 1) // type = 1 (ICO)
+	binary.LittleEndian.PutUint16(buf[4:], 1) // count = 1 image
+	// Directory entry
+	buf[6] = byte(size) // width
+	buf[7] = byte(size) // height
+	buf[8] = 0          // color count (0 = no palette)
+	buf[9] = 0          // reserved
+	binary.LittleEndian.PutUint16(buf[10:], 1)                    // planes
+	binary.LittleEndian.PutUint16(buf[12:], 32)                   // bit count
+	binary.LittleEndian.PutUint32(buf[14:], uint32(len(pngData))) // image data size
+	binary.LittleEndian.PutUint32(buf[18:], 22)                   // image data offset
+	copy(buf[22:], pngData)
+	return buf
 }

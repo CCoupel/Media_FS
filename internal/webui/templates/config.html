@@ -23,9 +23,10 @@
     .server-info { flex: 1; min-width: 0; }
     .server-name { font-weight: 600; font-size: .95rem; }
     .server-url  { font-size: .8rem; color: #64748b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .status-dot  { width: 8px; height: 8px; border-radius: 50%; background: #64748b; flex-shrink: 0; }
-    .status-dot.ok  { background: #22c55e; }
-    .status-dot.err { background: #ef4444; }
+    .status-dot      { width: 8px; height: 8px; border-radius: 50%; background: #64748b; flex-shrink: 0; }
+    .status-dot.ok   { background: #22c55e; }
+    .status-dot.warn { background: #f59e0b; }
+    .status-dot.err  { background: #ef4444; }
     .btn { cursor: pointer; border: none; border-radius: .4rem; padding: .4rem .9rem; font-size: .8rem; font-weight: 500; transition: opacity .15s; }
     .btn:hover { opacity: .85; }
     .btn-ghost  { background: transparent; border: 1px solid #334155; color: #94a3b8; }
@@ -210,9 +211,17 @@ async function removeServer(alias) {
 
 async function testServer(alias, url, type, username, apiKey) {
   const dot = document.getElementById('dot-' + alias);
-  dot.className = 'status-dot';
-  const r = await fetch('/api/servers/test', {method:'POST', body: JSON.stringify({alias, url, type, username, api_key: apiKey})});
-  dot.className = 'status-dot ' + (r.ok ? 'ok' : 'err');
+  dot.className = 'status-dot'; // reset to grey while testing
+  try {
+    const r = await fetch('/api/servers/test', {method:'POST', body: JSON.stringify({alias, url, type, username, api_key: apiKey})});
+    const data = await r.json();
+    const cls = {ok:'ok', auth_error:'warn', unreachable:'err'}[data.status] ?? 'err';
+    dot.className = 'status-dot ' + cls;
+    dot.title = data.message || '';
+  } catch(e) {
+    dot.className = 'status-dot err';
+    dot.title = e.message;
+  }
 }
 
 async function testFormServer() {
@@ -223,11 +232,23 @@ async function testFormServer() {
     username: document.getElementById('f-user').value,
     api_key:  document.getElementById('f-key').value,
   };
-  const r = await fetch('/api/servers/test', {method:'POST', body: JSON.stringify(body)});
   const n = document.getElementById('add-notice');
   n.style.display = 'inline';
-  if (r.ok) { n.textContent = '✓ Connexion réussie'; n.className = 'notice'; }
-  else       { n.textContent = '✗ Connexion échouée'; n.className = 'notice error'; }
+  n.textContent = '⏳ Test en cours…';
+  n.className = 'notice';
+  try {
+    const r = await fetch('/api/servers/test', {method:'POST', body: JSON.stringify(body)});
+    const data = await r.json();
+    if (data.status === 'ok') {
+      n.textContent = '✓ Connexion et authentification OK'; n.className = 'notice';
+    } else if (data.status === 'auth_error') {
+      n.textContent = '⚠ Serveur joignable mais authentification échouée'; n.className = 'notice error';
+    } else {
+      n.textContent = '✗ Serveur injoignable — ' + (data.message || ''); n.className = 'notice error';
+    }
+  } catch(e) {
+    n.textContent = '✗ Erreur réseau'; n.className = 'notice error';
+  }
 }
 
 async function saveConfig() {
