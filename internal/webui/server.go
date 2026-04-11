@@ -9,6 +9,7 @@ import (
 	"html/template"
 	"net"
 	"net/http"
+	"strings"
 
 	"github.com/CCoupel/Media_FS/internal/config"
 )
@@ -33,7 +34,9 @@ func New(cfg *config.Config, onSave func(*config.Config) error) (*Server, error)
 		return nil, err
 	}
 
-	tmpl, err := template.ParseFS(templateFS, "templates/*.html")
+	tmpl, err := template.New("").Funcs(template.FuncMap{
+		"upper": strings.ToUpper,
+	}).ParseFS(templateFS, "templates/*.html")
 	if err != nil {
 		return nil, err
 	}

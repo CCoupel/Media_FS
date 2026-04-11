@@ -34,28 +34,31 @@ type Library struct {
 
 // MediaItem is a file or folder within a library.
 type MediaItem struct {
-	ID       string
-	ParentID string
-	Name     string
-	Type     ItemType
-	IsFolder bool
-	FileSize int64 // 0 for folders
+	ID        string
+	ParentID  string
+	Name      string
+	Type      ItemType
+	IsFolder  bool
+	FileSize  int64  // 0 for folders
+	DateAdded string // ISO 8601 from server, used for mtime
 }
 
 // ItemMetadata holds the full metadata for a media item.
 type ItemMetadata struct {
-	ID          string
-	Name        string
-	Type        ItemType
-	Year        int
-	Overview    string
-	Rating      float64
-	Genres      []string
-	Directors   []string
-	FileSize    int64
-	RunTimeTicks int64 // Jellyfin/Emby ticks (100ns units)
-	DateAdded   string
-	ExternalIDs map[string]string // "imdb" → "tt1375666", etc.
+	ID            string
+	Name          string
+	Type          ItemType
+	Year          int
+	Overview      string
+	Rating        float64
+	Genres        []string
+	Directors     []string
+	FileSize      int64
+	RunTimeTicks  int64 // Jellyfin/Emby ticks (100ns units)
+	DateAdded     string
+	ExternalIDs   map[string]string // "imdb" → "tt1375666", etc.
+	SeasonNumber  int
+	EpisodeNumber int
 }
 
 // MediaConnector is the interface all server connectors must implement.

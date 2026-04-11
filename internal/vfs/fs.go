@@ -1,14 +1,17 @@
 package vfs
 
 import (
+	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/winfsp/cgofuse/fuse"
 
 	"github.com/CCoupel/Media_FS/internal/cache"
 	"github.com/CCoupel/Media_FS/internal/connector"
 	"github.com/CCoupel/Media_FS/internal/downloader"
+	"github.com/CCoupel/Media_FS/pkg/nfo"
 )
 
 // MountedServer groups a connector with its server key and cached libraries.
@@ -35,9 +38,10 @@ type MediaFS struct {
 }
 
 type fileHandle struct {
-	streamURL string
-	fileSize  int64
-	serverKey string
+	streamURL  string
+	fileSize   int64
+	serverKey  string
+	nfoContent []byte // non-nil: virtual .nfo file; serve from slice, no HTTP call
 }
 
 // New creates a MediaFS instance.
@@ -84,6 +88,17 @@ func (fs *MediaFS) Getattr(path string, stat *fuse.Stat_t, fh uint64) int {
 		return 0
 	}
 
+	// Virtual .nfo sidecar: check before general resolution
+	if strings.HasSuffix(parts[len(parts)-1], ".nfo") {
+		item, err := fs.resolveNFOItem(parts)
+		if err != nil || item == nil {
+			return -fuse.ENOENT
+		}
+		stat.Mode = fuse.S_IFREG | 0444
+		stat.Size = 2048 // conservative estimate; exact size served at Read
+		return 0
+	}
+
 	// Deeper paths: resolve via connector
 	item, err := fs.resolveItem(parts)
 	if err != nil {
@@ -98,6 +113,12 @@ func (fs *MediaFS) Getattr(path string, stat *fuse.Stat_t, fh uint64) int {
 	} else {
 		stat.Mode = fuse.S_IFREG | 0444
 		stat.Size = item.FileSize
+		if item.DateAdded != "" {
+			if t, err := time.Parse(time.RFC3339Nano, item.DateAdded); err == nil {
+				stat.Mtim.Sec = t.Unix()
+				stat.Mtim.Nsec = int64(t.Nanosecond())
+			}
+		}
 	}
 	return 0
 }
@@ -169,6 +190,27 @@ func (fs *MediaFS) Open(path string, flags int) (int, uint64) {
 		return -fuse.ENOENT, ^uint64(0)
 	}
 
+	// Virtual .nfo sidecar
+	if strings.HasSuffix(parts[len(parts)-1], ".nfo") {
+		item, err := fs.resolveNFOItem(parts)
+		if err != nil || item == nil {
+			return -fuse.ENOENT, ^uint64(0)
+		}
+		content, err := fs.generateNFO(parts[0], item)
+		if err != nil {
+			return -fuse.EIO, ^uint64(0)
+		}
+		fs.handlesMu.Lock()
+		fh := fs.nextFH
+		fs.nextFH++
+		fs.handles[fh] = &fileHandle{
+			nfoContent: content,
+			fileSize:   int64(len(content)),
+		}
+		fs.handlesMu.Unlock()
+		return 0, fh
+	}
+
 	item, err := fs.resolveItem(parts)
 	if err != nil || item == nil || item.IsFolder {
 		return -fuse.ENOENT, ^uint64(0)
@@ -205,6 +247,14 @@ func (fs *MediaFS) Read(path string, buf []byte, ofst int64, fh uint64) int {
 		return -fuse.EBADF
 	}
 
+	// Virtual .nfo: serve from in-memory slice
+	if h.nfoContent != nil {
+		if ofst >= int64(len(h.nfoContent)) {
+			return 0
+		}
+		return copy(buf, h.nfoContent[ofst:])
+	}
+
 	length := int64(len(buf))
 	if ofst+length > h.fileSize {
 		length = h.fileSize - ofst
@@ -218,8 +268,7 @@ func (fs *MediaFS) Read(path string, buf []byte, ofst int64, fh uint64) int {
 		return -fuse.EIO
 	}
 
-	n := copy(buf, data)
-	return n
+	return copy(buf, data)
 }
 
 func (fs *MediaFS) Release(path string, fh uint64) int {
@@ -331,6 +380,54 @@ func (fs *MediaFS) listItems(parts []string) ([]connector.MediaItem, error) {
 	}
 
 	return fs.listItemsCached(parts[0], lib.ID, parentID)
+}
+
+// resolveNFOItem finds the media item whose base name matches a .nfo path.
+// e.g. ["cyril@Home", "Films", "Inception.nfo"] → MediaItem for "Inception.mkv"
+func (fs *MediaFS) resolveNFOItem(parts []string) (*connector.MediaItem, error) {
+	nfoBase := strings.TrimSuffix(parts[len(parts)-1], ".nfo")
+	parentParts := parts[:len(parts)-1]
+	if len(parentParts) < 2 {
+		return nil, nil
+	}
+	items, err := fs.listItems(parentParts)
+	if err != nil {
+		return nil, err
+	}
+	for i := range items {
+		if !items[i].IsFolder {
+			base := strings.TrimSuffix(items[i].Name, extensionOf(items[i].Name))
+			if base == nfoBase {
+				return &items[i], nil
+			}
+		}
+	}
+	return nil, nil
+}
+
+// generateNFO fetches metadata (via cache) and renders the NFO XML.
+func (fs *MediaFS) generateNFO(serverKey string, item *connector.MediaItem) ([]byte, error) {
+	var meta connector.ItemMetadata
+	if ok, _ := fs.cache.GetMetadata(serverKey, item.ID, &meta); !ok {
+		srv := fs.serverForKey(serverKey)
+		if srv == nil {
+			return nil, fmt.Errorf("server %q not found", serverKey)
+		}
+		var err error
+		meta, err = srv.Conn.GetItemMetadata(item.ID)
+		if err != nil {
+			return nil, err
+		}
+		_ = fs.cache.StoreMetadata(serverKey, item.ID, meta)
+	}
+	switch item.Type {
+	case connector.ItemTypeSeries:
+		return nfo.TVShow(meta)
+	case connector.ItemTypeEpisode:
+		return nfo.Episode(meta, meta.SeasonNumber, meta.EpisodeNumber)
+	default:
+		return nfo.Movie(meta)
+	}
 }
 
 func (fs *MediaFS) listItemsCached(serverKey, libID, parentID string) ([]connector.MediaItem, error) {

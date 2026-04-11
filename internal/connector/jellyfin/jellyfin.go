@@ -105,11 +105,12 @@ func (c *Client) GetItems(libraryID, parentID string) ([]connector.MediaItem, er
 
 	var result struct {
 		Items []struct {
-			ID                string `json:"Id"`
-			ParentID          string `json:"ParentId"`
-			Name              string `json:"Name"`
-			Type              string `json:"Type"`
-			IsFolder          bool   `json:"IsFolder"`
+			ID           string `json:"Id"`
+			ParentID     string `json:"ParentId"`
+			Name         string `json:"Name"`
+			Type         string `json:"Type"`
+			IsFolder     bool   `json:"IsFolder"`
+			DateCreated  string `json:"DateCreated"`
 			MediaSources []struct {
 				Size int64 `json:"Size"`
 			} `json:"MediaSources"`
@@ -126,12 +127,13 @@ func (c *Client) GetItems(libraryID, parentID string) ([]connector.MediaItem, er
 			size = it.MediaSources[0].Size
 		}
 		items[i] = connector.MediaItem{
-			ID:       it.ID,
-			ParentID: it.ParentID,
-			Name:     it.Name,
-			Type:     connector.ItemType(it.Type),
-			IsFolder: it.IsFolder,
-			FileSize: size,
+			ID:        it.ID,
+			ParentID:  it.ParentID,
+			Name:      it.Name,
+			Type:      connector.ItemType(it.Type),
+			IsFolder:  it.IsFolder,
+			FileSize:  size,
+			DateAdded: it.DateCreated,
 		}
 	}
 	return items, nil
@@ -147,16 +149,18 @@ func (c *Client) GetItemMetadata(itemID string) (connector.ItemMetadata, error) 
 	defer resp.Body.Close()
 
 	var raw struct {
-		ID           string   `json:"Id"`
-		Name         string   `json:"Name"`
-		Type         string   `json:"Type"`
-		ProductionYear int    `json:"ProductionYear"`
-		Overview     string   `json:"Overview"`
-		CommunityRating float64 `json:"CommunityRating"`
-		Genres       []string `json:"Genres"`
-		RunTimeTicks int64    `json:"RunTimeTicks"`
-		DateCreated  string   `json:"DateCreated"`
-		ProviderIDs  map[string]string `json:"ProviderIds"`
+		ID                 string            `json:"Id"`
+		Name               string            `json:"Name"`
+		Type               string            `json:"Type"`
+		ProductionYear     int               `json:"ProductionYear"`
+		Overview           string            `json:"Overview"`
+		CommunityRating    float64           `json:"CommunityRating"`
+		Genres             []string          `json:"Genres"`
+		RunTimeTicks       int64             `json:"RunTimeTicks"`
+		DateCreated        string            `json:"DateCreated"`
+		IndexNumber        int               `json:"IndexNumber"`
+		ParentIndexNumber  int               `json:"ParentIndexNumber"`
+		ProviderIDs        map[string]string `json:"ProviderIds"`
 		People []struct {
 			Name string `json:"Name"`
 			Type string `json:"Type"`
@@ -181,18 +185,20 @@ func (c *Client) GetItemMetadata(itemID string) (connector.ItemMetadata, error) 
 	}
 
 	return connector.ItemMetadata{
-		ID:           raw.ID,
-		Name:         raw.Name,
-		Type:         connector.ItemType(raw.Type),
-		Year:         raw.ProductionYear,
-		Overview:     raw.Overview,
-		Rating:       raw.CommunityRating,
-		Genres:       raw.Genres,
-		Directors:    directors,
-		FileSize:     fileSize,
-		RunTimeTicks: raw.RunTimeTicks,
-		DateAdded:    raw.DateCreated,
-		ExternalIDs:  raw.ProviderIDs,
+		ID:            raw.ID,
+		Name:          raw.Name,
+		Type:          connector.ItemType(raw.Type),
+		Year:          raw.ProductionYear,
+		Overview:      raw.Overview,
+		Rating:        raw.CommunityRating,
+		Genres:        raw.Genres,
+		Directors:     directors,
+		FileSize:      fileSize,
+		RunTimeTicks:  raw.RunTimeTicks,
+		DateAdded:     raw.DateCreated,
+		ExternalIDs:   raw.ProviderIDs,
+		EpisodeNumber: raw.IndexNumber,
+		SeasonNumber:  raw.ParentIndexNumber,
 	}, nil
 }
 

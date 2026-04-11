@@ -111,6 +111,15 @@ func mountAll(cfg *config.Config, fs *vfs.MediaFS, mgr *tray.Manager) {
 }
 
 func mountServer(cfg *config.Config, key string, fs *vfs.MediaFS, mgr *tray.Manager) {
+	if err := connectServer(cfg, key, fs); err != nil {
+		mgr.UpdateStatus(key, false, err.Error())
+		return
+	}
+	mgr.UpdateStatus(key, true, "")
+}
+
+// connectServer connects a server and registers it in the VFS, without tray dependency.
+func connectServer(cfg *config.Config, key string, fs *vfs.MediaFS) error {
 	var srvCfg *config.ServerConfig
 	for i := range cfg.Servers {
 		if cfg.Servers[i].ServerKey() == key {
@@ -119,31 +128,25 @@ func mountServer(cfg *config.Config, key string, fs *vfs.MediaFS, mgr *tray.Mana
 		}
 	}
 	if srvCfg == nil {
-		return
+		return fmt.Errorf("server %q not found in config", key)
 	}
-
 	conn := connector.New(srvCfg.Type)
 	if conn == nil {
-		mgr.UpdateStatus(key, false, fmt.Sprintf("unknown connector type %q", srvCfg.Type))
-		return
+		return fmt.Errorf("unknown connector type %q", srvCfg.Type)
 	}
 	if err := conn.Connect(*srvCfg); err != nil {
-		mgr.UpdateStatus(key, false, err.Error())
-		return
+		return err
 	}
-
 	libs, err := conn.GetLibraries()
 	if err != nil {
-		mgr.UpdateStatus(key, false, err.Error())
-		return
+		return err
 	}
-
 	fs.AddServer(&vfs.MountedServer{
 		Key:       key,
 		Conn:      conn,
 		Libraries: libs,
 	})
-	mgr.UpdateStatus(key, true, "")
+	return nil
 }
 
 // --- CLI subcommands ---
@@ -151,16 +154,148 @@ func mountServer(cfg *config.Config, key string, fs *vfs.MediaFS, mgr *tray.Mana
 func runCLI(args []string) {
 	switch args[0] {
 	case "mount":
-		fmt.Println("mount: use the tray UI or run mediafs without arguments")
+		runMount(args[1:])
 	case "umount", "unmount":
-		fmt.Println("unmount: not yet implemented via CLI")
+		fmt.Fprintln(os.Stderr, "umount: use the tray menu or kill the mediafs process")
 	case "status":
-		fmt.Println("status: not yet implemented via CLI")
+		runStatus()
 	case "refresh":
-		fmt.Println("refresh: not yet implemented via CLI")
+		runRefresh(args[1:])
+	case "help", "--help", "-h":
+		printUsage()
 	default:
-		fmt.Fprintf(os.Stderr, "unknown command: %s\n", args[0])
+		fmt.Fprintf(os.Stderr, "unknown command: %s\n\n", args[0])
+		printUsage()
 		os.Exit(1)
+	}
+}
+
+func printUsage() {
+	fmt.Print(`Usage: mediafs [command] [server...]
+
+Commands:
+  mount [key...]    Mount servers headless (all enabled if no key given)
+  umount [key...]   Unmount servers (use tray or kill process for now)
+  status            Ping all configured servers and show reachability
+  refresh [key...]  Invalidate cache (all servers if no key given)
+
+Run without arguments to start with system tray.
+`)
+}
+
+func runMount(keys []string) {
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("config: %v", err)
+	}
+
+	cacheInst, err := cache.Open(
+		time.Duration(cfg.Cache.TTLItemsSec)*time.Second,
+		time.Duration(cfg.Cache.TTLMetaSec)*time.Second,
+		time.Duration(cfg.Cache.TTLArtworkSec)*time.Second,
+	)
+	if err != nil {
+		log.Fatalf("cache: %v", err)
+	}
+	defer cacheInst.Close()
+
+	dl := &downloader.Downloader{
+		ParallelChunks: cfg.Download.ParallelChunks,
+		ChunkSizeMB:    cfg.Download.ChunkSizeMB,
+		BufferSizeKB:   cfg.Download.BufferSizeKB,
+		HTTPClient:     &http.Client{Timeout: 0},
+	}
+
+	fs := vfs.New(cacheInst, dl)
+
+	targets := keys
+	if len(targets) == 0 {
+		for _, srv := range cfg.Servers {
+			if srv.Enabled {
+				targets = append(targets, srv.ServerKey())
+			}
+		}
+	}
+
+	for _, key := range targets {
+		if err := connectServer(cfg, key, fs); err != nil {
+			log.Printf("  ✕ %s: %v", key, err)
+		} else {
+			log.Printf("  ● %s: connected", key)
+		}
+	}
+
+	host := fuse.NewFileSystemHost(fs)
+	var mountArgs []string
+	if runtime.GOOS == "windows" {
+		mountArgs = []string{cfg.Mount.DriveLetter + ":"}
+	} else {
+		mountArgs = []string{cfg.Mount.MountPoint}
+	}
+	log.Printf("Mounting at %s (Ctrl+C to unmount)...", mountArgs[0])
+	if !host.Mount("", mountArgs) {
+		log.Fatal("VFS mount failed")
+	}
+}
+
+func runStatus() {
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("config: %v", err)
+	}
+	if len(cfg.Servers) == 0 {
+		fmt.Println("No servers configured.")
+		return
+	}
+	for _, srv := range cfg.Servers {
+		if !srv.Enabled {
+			fmt.Printf("  ○ %s (disabled)\n", srv.ServerKey())
+			continue
+		}
+		conn := connector.New(srv.Type)
+		if conn == nil {
+			fmt.Printf("  ✕ %s: unknown type %q\n", srv.ServerKey(), srv.Type)
+			continue
+		}
+		if err := conn.Connect(srv); err != nil {
+			fmt.Printf("  ✕ %s: %v\n", srv.ServerKey(), err)
+			continue
+		}
+		if err := conn.Ping(); err != nil {
+			fmt.Printf("  ✕ %s: unreachable (%v)\n", srv.ServerKey(), err)
+			continue
+		}
+		fmt.Printf("  ● %s: reachable (%s)\n", srv.ServerKey(), srv.URL)
+	}
+}
+
+func runRefresh(keys []string) {
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("config: %v", err)
+	}
+	cacheInst, err := cache.Open(
+		time.Duration(cfg.Cache.TTLItemsSec)*time.Second,
+		time.Duration(cfg.Cache.TTLMetaSec)*time.Second,
+		time.Duration(cfg.Cache.TTLArtworkSec)*time.Second,
+	)
+	if err != nil {
+		log.Fatalf("cache: %v", err)
+	}
+	defer cacheInst.Close()
+
+	targets := keys
+	if len(targets) == 0 {
+		for _, srv := range cfg.Servers {
+			targets = append(targets, srv.ServerKey())
+		}
+	}
+	for _, key := range targets {
+		if err := cacheInst.Invalidate(key); err != nil {
+			fmt.Printf("  ✕ %s: %v\n", key, err)
+		} else {
+			fmt.Printf("  ✓ %s: cache cleared\n", key)
+		}
 	}
 }
 
