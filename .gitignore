@@ -19,3 +19,6 @@
 # OS
 Thumbs.db
 desktop.ini
+
+# Échanges temporaires (non versionnés)
+/TMP/
