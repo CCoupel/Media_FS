@@ -35,9 +35,13 @@ type MediaFS struct {
 	dl       *downloader.Downloader
 
 	// open file handles: handle → streamURL + current offset
-	handles map[uint64]*fileHandle
-	nextFH  uint64
+	handles   map[uint64]*fileHandle
+	nextFH    uint64
 	handlesMu sync.Mutex
+
+	// nfoCache stores generated NFO content keyed by VFS path so that
+	// Getattr can return the real file size on subsequent calls.
+	nfoCache sync.Map // path(string) → []byte
 }
 
 type fileHandle struct {
@@ -112,7 +116,11 @@ func (fs *MediaFS) Getattr(path string, stat *fuse.Stat_t, fh uint64) int {
 			return -fuse.ENOENT
 		}
 		stat.Mode = fuse.S_IFREG | 0444
-		stat.Size = 2048 // conservative estimate; exact size served at Read
+		if cached, ok := fs.nfoCache.Load(path); ok {
+			stat.Size = int64(len(cached.([]byte)))
+		} else {
+			stat.Size = 4096 // estimate until first Open caches the real content
+		}
 		return 0
 	}
 
@@ -259,13 +267,28 @@ func (fs *MediaFS) Open(path string, flags int) (int, uint64) {
 	// Virtual .nfo sidecar
 	if strings.HasSuffix(parts[len(parts)-1], ".nfo") {
 		item, err := fs.resolveNFOItem(parts)
-		if err != nil || item == nil {
+		if err != nil {
+			log.Printf("[vfs] NFO resolveItem error %s: %v", path, err)
 			return -fuse.ENOENT, ^uint64(0)
 		}
-		content, err := fs.generateNFO(parts[0], item)
-		if err != nil {
-			return -fuse.EIO, ^uint64(0)
+		if item == nil {
+			log.Printf("[vfs] NFO item not found: %s", path)
+			return -fuse.ENOENT, ^uint64(0)
 		}
+
+		var content []byte
+		if cached, ok := fs.nfoCache.Load(path); ok {
+			content = cached.([]byte)
+		} else {
+			content, err = fs.generateNFO(parts[0], item)
+			if err != nil {
+				log.Printf("[vfs] NFO generate error %s: %v", path, err)
+				return -fuse.EIO, ^uint64(0)
+			}
+			fs.nfoCache.Store(path, content)
+			log.Printf("[vfs] NFO generated %s (%d bytes)", path, len(content))
+		}
+
 		fs.handlesMu.Lock()
 		fh := fs.nextFH
 		fs.nextFH++
