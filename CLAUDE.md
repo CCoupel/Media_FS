@@ -55,6 +55,20 @@ golangci-lint run                      # lint
 | Commande | Rôle |
 |---|---|
 | `/marketing` | Régénère et déploie le site GitHub Pages (`gh-pages` branch) |
+| `/dev-issue <N>` | Workflow complet de développement pour une issue (analyse → branch → workshop → plan → test → dev → build → QA → review → PR) |
+
+## Versioning
+
+Semantic Versioning — version courante dans `cmd/mediafs/version.go`.
+
+| Bump | Quand |
+|---|---|
+| `patch` (0.0.x) | Bug fix, amélioration mineure sans nouvelle API |
+| `minor` (0.x.0) | Nouvelle feature, nouvelle commande CLI, nouveau connecteur |
+| `major` (x.0.0) | Changement breaking (interface connector, format config.yaml) |
+
+Branches : `feat/issue-{N}-{slug}` ou `fix/issue-{N}-{slug}`
+Tags : créés à la merge de PR (`v0.2.0`, etc.)
 
 ## Backlog
 
