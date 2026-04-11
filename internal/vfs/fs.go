@@ -3,6 +3,7 @@ package vfs
 import (
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -148,11 +149,13 @@ func (fs *MediaFS) Readdir(path string,
 	fill("..", nil, 0)
 
 	parts := splitPath(path)
+	log.Printf("[vfs] Readdir %q (depth=%d)", path, len(parts))
 
 	if len(parts) == 0 {
 		// Root: list all server keys
 		fs.mu.RLock()
 		defer fs.mu.RUnlock()
+		log.Printf("[vfs] root: %d servers", len(fs.servers))
 		for key := range fs.servers {
 			fill(key, &fuse.Stat_t{Mode: fuse.S_IFDIR | 0555}, 0)
 		}
@@ -165,8 +168,10 @@ func (fs *MediaFS) Readdir(path string,
 		srv, ok := fs.servers[parts[0]]
 		fs.mu.RUnlock()
 		if !ok {
+			log.Printf("[vfs] server %q not found", parts[0])
 			return -fuse.ENOENT
 		}
+		log.Printf("[vfs] server %q: %d libraries", parts[0], len(srv.Libraries))
 		for _, lib := range srv.Libraries {
 			fill(lib.Name, &fuse.Stat_t{Mode: fuse.S_IFDIR | 0555}, 0)
 		}
@@ -176,8 +181,10 @@ func (fs *MediaFS) Readdir(path string,
 	// List items under a library/folder
 	items, err := fs.listItems(parts)
 	if err != nil {
+		log.Printf("[vfs] listItems %q error: %v", path, err)
 		return -fuse.EIO
 	}
+	log.Printf("[vfs] listItems %q → %d items", path, len(items))
 	for _, it := range items {
 		st := &fuse.Stat_t{}
 		if it.IsFolder {
@@ -560,18 +567,23 @@ func (fs *MediaFS) listItemsCached(serverKey, libID, parentID string) ([]connect
 
 	var items []connector.MediaItem
 	if ok, err := fs.cache.GetItems(serverKey, cacheKey, &items); ok {
+		log.Printf("[vfs] cache hit: server=%s lib=%s parent=%s → %d items", serverKey, libID, parentID, len(items))
 		return items, err
 	}
 
 	srv := fs.serverForKey(serverKey)
 	if srv == nil {
+		log.Printf("[vfs] listItemsCached: server %q not found", serverKey)
 		return nil, nil
 	}
 
+	log.Printf("[vfs] fetching items: server=%s lib=%s parent=%s", serverKey, libID, parentID)
 	items, err := srv.Conn.GetItems(libID, parentID)
 	if err != nil {
+		log.Printf("[vfs] GetItems error: server=%s lib=%s parent=%s: %v", serverKey, libID, parentID, err)
 		return nil, err
 	}
+	log.Printf("[vfs] GetItems: server=%s lib=%s parent=%s → %d items", serverKey, libID, parentID, len(items))
 
 	_ = fs.cache.StoreItems(serverKey, cacheKey, items)
 	return items, nil

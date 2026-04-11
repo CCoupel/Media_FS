@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"time"
@@ -40,19 +41,23 @@ func (c *Client) Connect(cfg config.ServerConfig) error {
 	c.http = &http.Client{Timeout: 15 * time.Second}
 
 	if cfg.APIKey != "" {
+		log.Printf("[jellyfin] connecting %s via API key", cfg.URL)
 		c.apiKey = cfg.APIKey
-		userID, err := c.resolveUserID(cfg.Username)
+		userID, err := c.resolveCurrentUserID()
 		if err != nil {
 			return fmt.Errorf("jellyfin connect: %w", err)
 		}
 		c.userID = userID
+		log.Printf("[jellyfin] API key auth OK, userID=%s", userID)
 	} else if cfg.Password != "" {
+		log.Printf("[jellyfin] connecting %s via password for user %q", cfg.URL, cfg.Username)
 		token, userID, err := c.authenticateByPassword(cfg.Username, cfg.Password)
 		if err != nil {
 			return fmt.Errorf("jellyfin connect: %w", err)
 		}
 		c.apiKey = token
 		c.userID = userID
+		log.Printf("[jellyfin] password auth OK, userID=%s", userID)
 	} else {
 		return fmt.Errorf("jellyfin connect: no api_key or password provided")
 	}
@@ -93,6 +98,7 @@ func (c *Client) GetLibraries() ([]connector.Library, error) {
 			Name: item.Name,
 			Type: collectionTypeToItemType(item.CollectionType),
 		}
+		log.Printf("[jellyfin] library %d: %q (id=%s collectionType=%s)", i, item.Name, item.ID, item.CollectionType)
 	}
 	return libs, nil
 }
@@ -293,29 +299,25 @@ func (c *Client) authenticateByPassword(username, password string) (string, stri
 	return result.AccessToken, result.User.ID, nil
 }
 
-func (c *Client) resolveUserID(username string) (string, error) {
-	resp, err := c.get("/Users", nil)
+// resolveCurrentUserID returns the user ID of the currently authenticated user
+// using GET /Users/Me (works for any API key, no admin required).
+func (c *Client) resolveCurrentUserID() (string, error) {
+	resp, err := c.get("/Users/Me", nil)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("resolveCurrentUserID: %w", err)
 	}
 	defer resp.Body.Close()
 
-	var users []struct {
-		ID   string `json:"Id"`
-		Name string `json:"Name"`
+	var user struct {
+		ID string `json:"Id"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&users); err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&user); err != nil {
 		return "", err
 	}
-	for _, u := range users {
-		if u.Name == username {
-			return u.ID, nil
-		}
+	if user.ID == "" {
+		return "", fmt.Errorf("empty user ID in /Users/Me response")
 	}
-	if len(users) > 0 {
-		return users[0].ID, nil
-	}
-	return "", fmt.Errorf("user %q not found", username)
+	return user.ID, nil
 }
 
 func collectionTypeToItemType(ct string) connector.ItemType {

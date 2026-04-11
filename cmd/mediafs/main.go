@@ -130,22 +130,34 @@ func connectServer(cfg *config.Config, key string, fs *vfs.MediaFS) error {
 	if srvCfg == nil {
 		return fmt.Errorf("server %q not found in config", key)
 	}
+	log.Printf("[mount] connecting %s (%s @ %s)", key, srvCfg.Type, srvCfg.URL)
+
 	conn := connector.New(srvCfg.Type)
 	if conn == nil {
 		return fmt.Errorf("unknown connector type %q", srvCfg.Type)
 	}
 	if err := conn.Connect(*srvCfg); err != nil {
+		log.Printf("[mount] connect error for %s: %v", key, err)
 		return err
 	}
+	log.Printf("[mount] authenticated as %s", key)
+
 	libs, err := conn.GetLibraries()
 	if err != nil {
+		log.Printf("[mount] GetLibraries error for %s: %v", key, err)
 		return err
 	}
+	log.Printf("[mount] %s: %d libraries found", key, len(libs))
+	for _, l := range libs {
+		log.Printf("[mount]   lib: %q (id=%s type=%s)", l.Name, l.ID, l.Type)
+	}
+
 	fs.AddServer(&vfs.MountedServer{
 		Key:       key,
 		Conn:      conn,
 		Libraries: libs,
 	})
+	log.Printf("[mount] %s registered in VFS", key)
 	return nil
 }
 
