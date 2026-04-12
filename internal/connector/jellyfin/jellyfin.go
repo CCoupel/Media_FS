@@ -161,7 +161,7 @@ func (c *Client) GetItems(libraryID, parentID string) ([]connector.MediaItem, er
 }
 
 func (c *Client) GetItemMetadata(itemID string) (connector.ItemMetadata, error) {
-	resp, err := c.get(fmt.Sprintf("/Items/%s", itemID), url.Values{
+	resp, err := c.get(fmt.Sprintf("/Users/%s/Items/%s", c.userID, itemID), url.Values{
 		"Fields": {"Genres,People,ExternalUrls,ProviderIds,DateCreated"},
 	})
 	if err != nil {
