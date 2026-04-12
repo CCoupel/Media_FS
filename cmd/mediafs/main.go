@@ -15,6 +15,7 @@ import (
 	_ "github.com/CCoupel/Media_FS/internal/connector/emby"
 	_ "github.com/CCoupel/Media_FS/internal/connector/jellyfin"
 	_ "github.com/CCoupel/Media_FS/internal/connector/plex"
+	_ "github.com/CCoupel/Media_FS/internal/connector/plextv"
 	"github.com/CCoupel/Media_FS/internal/downloader"
 	"github.com/CCoupel/Media_FS/internal/syscheck"
 	"github.com/CCoupel/Media_FS/internal/tray"
