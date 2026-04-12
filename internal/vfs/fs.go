@@ -144,7 +144,15 @@ func (fs *MediaFS) Getattr(path string, stat *fuse.Stat_t, fh uint64) int {
 		if data, ok, _ := fs.cache.GetArtwork(parts[0], item.ID, string(artType)); ok {
 			stat.Size = int64(len(data))
 		} else {
-			stat.Size = 51200 // 50 KB estimate before first fetch
+			// Fetch eagerly so stat() returns exact size on first call.
+			// Fixes Explorer thumbnail corruption caused by truncated JPEG reads.
+			// Open() will serve from the warm cache without re-fetching.
+			data, fetchErr := fs.fetchArtwork(parts[0], item, artType)
+			if fetchErr == nil && data != nil {
+				stat.Size = int64(len(data))
+			} else {
+				stat.Size = 51200 // fallback if server unreachable or 404
+			}
 		}
 		return 0
 	}
@@ -228,13 +236,24 @@ func (fs *MediaFS) Readdir(path string,
 		}
 		fill(it.Name, st, 0)
 
-		// Inject virtual sidecar files (.nfo + artwork)
+		// Inject virtual sidecar files (.nfo + artwork).
+		// Use cached sizes when warm so directory listings reflect real sizes.
 		base := strings.TrimSuffix(it.Name, extensionOf(it.Name))
 		if !it.IsFolder {
-			fill(base+".nfo", &fuse.Stat_t{Mode: fuse.S_IFREG | 0444, Size: 1024}, 0)
+			nfoSize := int64(1024)
+			if cached, ok := fs.nfoCache.Load(path + "/" + base + ".nfo"); ok {
+				nfoSize = int64(len(cached.([]byte)))
+			}
+			fill(base+".nfo", &fuse.Stat_t{Mode: fuse.S_IFREG | 0444, Size: nfoSize}, 0)
 		}
 		for _, artFile := range connector.ArtworkFilenames(it.Type) {
-			fill(base+"-"+artFile, &fuse.Stat_t{Mode: fuse.S_IFREG | 0444, Size: 51200}, 0)
+			artSize := int64(51200)
+			if artType, ok := connector.ArtworkTypeForFilename(artFile); ok {
+				if data, cached, _ := fs.cache.GetArtwork(parts[0], it.ID, string(artType)); cached {
+					artSize = int64(len(data))
+				}
+			}
+			fill(base+"-"+artFile, &fuse.Stat_t{Mode: fuse.S_IFREG | 0444, Size: artSize}, 0)
 		}
 	}
 	return 0
