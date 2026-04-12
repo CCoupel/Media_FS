@@ -214,12 +214,19 @@ func (c *Client) fetchMovieFiles(movieID string) ([]connector.MediaItem, error) 
 		return nil, err
 	}
 	if len(raw.Videos) == 0 {
+		log.Printf("[plex] fetchMovieFiles %s: no Video element in metadata response", movieID)
 		return nil, nil
 	}
 	item := mapXMLItem(raw.Videos[0])
 	// Ensure the file item carries the same display name as its parent folder
 	// so NFO/artwork path resolution (base-name matching) works correctly.
 	item.Name = movieFolderName(raw.Videos[0])
+	if item.FileSize == 0 {
+		log.Printf("[plex] fetchMovieFiles %s (%q): FileSize=0 — Media/Part missing or size absent in XML", movieID, item.Name)
+	}
+	if item.Extension == "" {
+		log.Printf("[plex] fetchMovieFiles %s (%q): Extension empty — container attribute missing", movieID, item.Name)
+	}
 	return []connector.MediaItem{item}, nil
 }
 

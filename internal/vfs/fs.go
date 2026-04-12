@@ -174,14 +174,17 @@ func (fs *MediaFS) Getattr(path string, stat *fuse.Stat_t, fh uint64) int {
 	} else {
 		stat.Mode = fuse.S_IFREG | 0444
 		stat.Size = item.FileSize
-		// Use cached metadata for PremiereDate/Year if available (warmed by NFO Getattr).
-		// If cold, trigger background fetch so next Getattr will have it.
+		// Use cached metadata for PremiereDate/Year and, when the items listing
+		// did not carry a file size (Plex omits it for some entries), for FileSize.
 		premiereDate := item.PremiereDate
 		productionYear := item.ProductionYear
 		var meta connector.ItemMetadata
 		if ok, _ := fs.cache.GetMetadata(parts[0], item.ID, &meta); ok {
 			premiereDate = meta.PremiereDate
 			productionYear = meta.Year
+			if stat.Size == 0 && meta.FileSize > 0 {
+				stat.Size = meta.FileSize
+			}
 		} else {
 			srv := fs.serverForKey(parts[0])
 			if srv != nil {
@@ -402,11 +405,14 @@ func (fs *MediaFS) Read(path string, buf []byte, ofst int64, fh uint64) int {
 	}
 
 	length := int64(len(buf))
-	if ofst+length > h.fileSize {
+	// Only clamp to the known file size when we have a reliable value.
+	// When fileSize == 0 (Plex did not report a size), let the HTTP layer
+	// determine how many bytes are available rather than returning EOF immediately.
+	if h.fileSize > 0 && ofst+length > h.fileSize {
 		length = h.fileSize - ofst
-	}
-	if length <= 0 {
-		return 0
+		if length <= 0 {
+			return 0
+		}
 	}
 
 	if h.reader != nil {
