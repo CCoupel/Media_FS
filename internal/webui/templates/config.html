@@ -61,6 +61,11 @@
     .badge-err  { background: #450a0a; color: #fca5a5; font-size: .75rem; font-weight: 600; padding: .2rem .6rem; border-radius: 999px; }
     .syscheck-label { font-size: .9rem; font-weight: 600; flex: 1; }
     .syscheck-note  { font-size: .8rem; color: #94a3b8; }
+    .version-row { display: flex; align-items: center; gap: 1rem; padding: .9rem 1.25rem; }
+    .version-label { font-size: .9rem; font-weight: 600; flex: 1; }
+    .version-current { font-size: .85rem; color: #94a3b8; font-variant-numeric: tabular-nums; }
+    .update-link { font-size: .8rem; color: #3b82f6; text-decoration: none; }
+    .update-link:hover { text-decoration: underline; }
 
     /* Monitor tab */
     .file-block { border-bottom: 1px solid #2d3748; padding: 1rem 1.25rem; }
@@ -104,6 +109,19 @@
 
 <!-- ===== CONFIGURATION TAB ===== -->
 <div id="tab-config">
+
+  <!-- Version & update check -->
+  <section>
+    <h2>Version</h2>
+    <div class="card">
+      <div class="version-row">
+        <span class="version-label">Media_FS</span>
+        <span class="version-current">{{.Version}}</span>
+        <span id="update-badge" class="badge-warn" style="display:none">—</span>
+        <a id="update-link" class="update-link" style="display:none" href="#" target="_blank"></a>
+      </div>
+    </div>
+  </section>
 
   <!-- System prerequisites -->
   <section>
@@ -232,7 +250,8 @@
         <div>
           <label>Taille chunk (MB)</label>
           <small>Unité de base : taille d'une requête Range = d'une fenêtre en RAM</small>
-          <input id="s-chunksize" type="number" min="8" max="512" value="{{.Download.ChunkSizeMB}}">
+          <input id="s-chunksize" type="number" min="8" max="512" value="{{.Download.ChunkSizeMB}}"
+                 oninput="updateCacheMBInfo()">
         </div>
       </div>
     </div>
@@ -244,8 +263,10 @@
     <div class="card">
       <div class="settings-grid">
         <div>
-          <label>Taille max cache (MB)</label>
-          <input id="s-maxcache" type="number" min="256" max="16384" value="{{.Download.MaxCacheMB}}">
+          <label>Taille max cache (chunks)</label>
+          <small id="cache-mb-info" style="color:#64748b">= {{.Download.MaxCacheMB}} MB</small>
+          <input id="s-maxcache" type="number" min="1" max="1024" value="{{.MaxCacheChunks}}"
+                 oninput="updateCacheMBInfo()">
         </div>
         <div>
           <label>TTL cache (min)</label>
@@ -351,11 +372,12 @@ function showTab(name, event) {
 function updateMemStats(data) {
   const cache = data.cache || {};
   const ttlMin = cache.ttl_min || 0;
+  const maxChunks = cache.max_chunks || 0;
   const items = [
-    ['Heap Go',        (data.heap_inuse_mb || 0) + ' MB'],
-    ['Cache fenêtres', (cache.data_mb || 0) + ' / ' + (cache.max_mb || 0) + ' MB'],
-    ['Fenêtres',       String(cache.count || 0)],
-    ['TTL',            ttlMin >= 60 ? (ttlMin / 60).toFixed(0) + ' h' : ttlMin + ' min'],
+    ['Heap Go (dont cache)', (data.heap_inuse_mb || 0) + ' MB'],
+    ['Cache fenêtres',       (cache.data_mb || 0) + ' / ' + (cache.max_mb || 0) + ' MB'],
+    ['Fenêtres',             (cache.count || 0) + (maxChunks ? ' / ' + maxChunks : '')],
+    ['TTL',                  ttlMin >= 60 ? (ttlMin / 60).toFixed(0) + ' h' : ttlMin + ' min'],
   ];
   const container = document.getElementById('mem-stats');
   if (!container) return;
@@ -717,8 +739,8 @@ async function saveConfig() {
     drive_letter:         document.getElementById('s-drive').value,
     mount_point:          document.getElementById('s-mount').value,
     parallel_chunks:      parseInt(document.getElementById('s-chunks').value) || 0,
-    chunk_size_mb:  parseInt(document.getElementById('s-chunksize').value) || 0,
-    max_cache_mb:   parseInt(document.getElementById('s-maxcache').value) || 0,
+    chunk_size_mb:    parseInt(document.getElementById('s-chunksize').value) || 0,
+    max_cache_chunks: parseInt(document.getElementById('s-maxcache').value) || 0,
     cache_ttl_min:        parseInt(document.getElementById('s-cachettl').value) || 0,
   };
   const r = await fetch('/api/save', {method: 'POST', body: JSON.stringify(settings)});
@@ -733,6 +755,42 @@ async function saveConfig() {
 document.getElementById('monitor-content').appendChild(
   el('div', {className: 'monitor-empty'}, 'Aucun fichier ouvert en ce moment.')
 );
+
+// ─── CACHE SIZE INFO ──────────────────────────────────────────────
+function updateCacheMBInfo() {
+  const chunks   = parseInt(document.getElementById('s-maxcache').value) || 0;
+  const chunkMB  = parseInt(document.getElementById('s-chunksize').value) || 0;
+  const info = document.getElementById('cache-mb-info');
+  if (info) info.textContent = chunks && chunkMB ? '= ' + (chunks * chunkMB) + ' MB' : '';
+}
+
+// ─── VERSION CHECK ────────────────────────────────────────────────
+async function checkLatestVersion() {
+  const current = '{{.Version}}';
+  try {
+    const r = await fetch('https://api.github.com/repos/CCoupel/Media_FS/releases/latest',
+      { headers: { Accept: 'application/vnd.github+json' } });
+    if (!r.ok) return;
+    const data = await r.json();
+    const latest = data.tag_name; // e.g. "v1.1.0"
+    if (!latest) return;
+    const badge = document.getElementById('update-badge');
+    const link  = document.getElementById('update-link');
+    if (latest === current) {
+      badge.className = 'badge-ok';
+      badge.textContent = 'À jour';
+      badge.style.display = '';
+    } else {
+      badge.className = 'badge-warn';
+      badge.textContent = latest + ' disponible';
+      badge.style.display = '';
+      link.href = data.html_url;
+      link.textContent = 'Voir la release →';
+      link.style.display = '';
+    }
+  } catch (_) {}
+}
+checkLatestVersion();
 
 // ─── SYSTEM STATUS ────────────────────────────────────────────────
 async function loadSystemStatus() {

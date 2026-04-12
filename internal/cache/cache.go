@@ -174,6 +174,11 @@ func (c *Cache) InvalidateItems(serverKey string) {
 	})
 }
 
+// ItemsTTL returns the configured TTL for item listings.
+func (c *Cache) ItemsTTL() time.Duration {
+	return c.ttlItems
+}
+
 func (c *Cache) Close() error {
 	return c.db.Close()
 }

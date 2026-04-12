@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/CCoupel/Media_FS/internal/config"
@@ -126,10 +127,12 @@ func (c *Client) GetItems(libraryID, parentID string) ([]connector.MediaItem, er
 		return c.fetchAllItems(fmt.Sprintf("/library/sections/%s/all", libraryID))
 	}
 
-	// Movie section root: fetch with GUIDs for IMDB/TMDB disambiguation.
+	// Movie section root: fetch without includeGuids to keep responses small
+	// and fast (GUIDs add ~10× more XML per item). Year-based disambiguation
+	// is used instead of IMDB/TMDB IDs.
 	rawItems, err := c.fetchAllXMLItems(
 		fmt.Sprintf("/library/sections/%s/all", libraryID),
-		url.Values{"includeGuids": {"1"}},
+		nil,
 	)
 	if err != nil {
 		return nil, err
@@ -231,17 +234,10 @@ func (c *Client) fetchMovieFiles(movieID string) ([]connector.MediaItem, error) 
 }
 
 // movieFolderName returns the VFS folder/file base name for a movie.
-// Prefers IMDB, then TMDB, then TVDB for disambiguation; falls back to title only.
+// Falls back to "Title (Year)" which is both readable and Kodi-compatible.
 func movieFolderName(it xmlItem) string {
-	for _, g := range it.Guids {
-		switch {
-		case strings.HasPrefix(g.ID, "imdb://"):
-			return fmt.Sprintf("%s {imdb-%s}", it.Title, strings.TrimPrefix(g.ID, "imdb://"))
-		case strings.HasPrefix(g.ID, "tmdb://"):
-			return fmt.Sprintf("%s {tmdb-%s}", it.Title, strings.TrimPrefix(g.ID, "tmdb://"))
-		case strings.HasPrefix(g.ID, "tvdb://"):
-			return fmt.Sprintf("%s {tvdb-%s}", it.Title, strings.TrimPrefix(g.ID, "tvdb://"))
-		}
+	if it.Year != "" && it.Year != "0" {
+		return fmt.Sprintf("%s (%s)", it.Title, it.Year)
 	}
 	return it.Title
 }
@@ -496,10 +492,12 @@ type itemsContainer struct {
 
 // fetchAllXMLItems fetches all pages from path and returns raw xmlItem values.
 // extra params are merged into each page request (e.g. includeGuids=1).
+// fetchAllXMLItems retrieves all pages for a Plex API path.
+// Page 0 is fetched first to get the total count; remaining pages are then
+// fetched in parallel so large libraries load in one round-trip time instead
+// of N sequential round-trips.
 func (c *Client) fetchAllXMLItems(path string, extra url.Values) ([]xmlItem, error) {
-	var all []xmlItem
-	offset := 0
-	for {
+	fetchPage := func(offset int) (itemsContainer, error) {
 		params := url.Values{
 			"X-Plex-Container-Start": {strconv.Itoa(offset)},
 			"X-Plex-Container-Size":  {strconv.Itoa(plexPageSize)},
@@ -507,20 +505,55 @@ func (c *Client) fetchAllXMLItems(path string, extra url.Values) ([]xmlItem, err
 		maps.Copy(params, extra)
 		resp, err := c.get(path, params)
 		if err != nil {
-			return nil, err
+			return itemsContainer{}, err
 		}
-		var container itemsContainer
-		decErr := xml.NewDecoder(resp.Body).Decode(&container)
+		var cont itemsContainer
+		decErr := xml.NewDecoder(resp.Body).Decode(&cont)
 		resp.Body.Close()
-		if decErr != nil {
-			return nil, decErr
+		return cont, decErr
+	}
+
+	// Fetch page 0 to get the first batch and the total item count.
+	first, err := fetchPage(0)
+	if err != nil {
+		return nil, err
+	}
+	all := mergeItems(first)
+	total := first.TotalSize
+	if total <= 0 || len(all) >= total || len(all) < plexPageSize {
+		return all, nil // single page or server didn't report total
+	}
+
+	// Build the list of remaining page offsets.
+	var offsets []int
+	for off := plexPageSize; off < total; off += plexPageSize {
+		offsets = append(offsets, off)
+	}
+
+	// Fetch remaining pages in parallel.
+	type result struct {
+		index int
+		items []xmlItem
+		err   error
+	}
+	results := make([]result, len(offsets))
+	var wg sync.WaitGroup
+	for i, off := range offsets {
+		wg.Add(1)
+		go func(i, off int) {
+			defer wg.Done()
+			cont, err := fetchPage(off)
+			results[i] = result{index: i, items: mergeItems(cont), err: err}
+		}(i, off)
+	}
+	wg.Wait()
+
+	// Merge in order; abort on first error.
+	for _, r := range results {
+		if r.err != nil {
+			return nil, r.err
 		}
-		items := mergeItems(container)
-		all = append(all, items...)
-		offset += len(items)
-		if len(items) < plexPageSize || (container.TotalSize > 0 && offset >= container.TotalSize) {
-			break
-		}
+		all = append(all, r.items...)
 	}
 	return all, nil
 }

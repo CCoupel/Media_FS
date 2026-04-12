@@ -30,10 +30,11 @@ type CachedWindow struct {
 
 // CacheStats is a JSON-serialisable snapshot of the window cache.
 type CacheStats struct {
-	DataMB  int64 `json:"data_mb"`
-	MaxMB   int64 `json:"max_mb"`
-	Count   int   `json:"count"`
-	TTLMin  int64 `json:"ttl_min"`
+	DataMB    int64 `json:"data_mb"`
+	MaxMB     int64 `json:"max_mb"`
+	Count     int   `json:"count"`     // ready windows currently in cache
+	MaxChunks int   `json:"max_chunks"` // max windows = MaxMB / ChunkSizeMB
+	TTLMin    int64 `json:"ttl_min"`
 }
 
 // MonitorData is the response payload for /api/monitor.
@@ -153,11 +154,17 @@ func (wc *WindowCache) Stats() CacheStats {
 	}
 	b, max := wc.dataBytes, wc.maxBytes
 	wc.mu.Unlock()
+	chunkBytes := int64(wc.dl.ChunkSizeMB) * 1024 * 1024
+	maxChunks := 0
+	if chunkBytes > 0 {
+		maxChunks = int(max / chunkBytes)
+	}
 	return CacheStats{
-		DataMB: b / (1024 * 1024),
-		MaxMB:  max / (1024 * 1024),
-		Count:  count,
-		TTLMin: int64(wc.ttl.Minutes()),
+		DataMB:    b / (1024 * 1024),
+		MaxMB:     max / (1024 * 1024),
+		Count:     count,
+		MaxChunks: maxChunks,
+		TTLMin:    int64(wc.ttl.Minutes()),
 	}
 }
 
