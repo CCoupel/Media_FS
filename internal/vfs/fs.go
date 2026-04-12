@@ -362,8 +362,10 @@ func (fs *MediaFS) Open(path string, flags int) (int, uint64) {
 
 	streamURL, err := srv.Conn.GetStreamURL(item.ID)
 	if err != nil {
+		log.Printf("[vfs] Open %s: GetStreamURL error: %v", path, err)
 		return -fuse.EIO, ^uint64(0)
 	}
+	log.Printf("[vfs] Open %s size=%d url=%s", path, item.FileSize, streamURL)
 
 	var reader *downloader.ReadAheadReader
 	if item.FileSize > 0 && fs.dl.ReadAheadWindows > 0 {
@@ -418,6 +420,7 @@ func (fs *MediaFS) Read(path string, buf []byte, ofst int64, fh uint64) int {
 	if h.reader != nil {
 		n, err := h.reader.ReadAt(buf[:length], ofst)
 		if err != nil {
+			log.Printf("[vfs] Read %s ofst=%d len=%d: ReadAhead error: %v", h.path, ofst, length, err)
 			return -fuse.EIO
 		}
 		return n
@@ -425,6 +428,7 @@ func (fs *MediaFS) Read(path string, buf []byte, ofst int64, fh uint64) int {
 
 	data, err := fs.dl.ReadAt(h.streamURL, nil, ofst, length)
 	if err != nil {
+		log.Printf("[vfs] Read %s ofst=%d len=%d: HTTP error: %v", h.path, ofst, length, err)
 		return -fuse.EIO
 	}
 	return copy(buf, data)
