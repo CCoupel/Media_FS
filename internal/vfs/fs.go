@@ -175,6 +175,9 @@ func (fs *MediaFS) Getattr(path string, stat *fuse.Stat_t, fh uint64) int {
 			if t, err := time.Parse(time.RFC3339Nano, item.DateAdded); err == nil {
 				stat.Mtim.Sec = t.Unix()
 				stat.Mtim.Nsec = int64(t.Nanosecond())
+				stat.Atim = stat.Mtim
+				stat.Ctim = stat.Mtim
+				stat.Birthtim = stat.Mtim
 			}
 		}
 	}
