@@ -5,6 +5,7 @@ package webui
 import (
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"net"
@@ -404,18 +405,29 @@ func (s *Server) handlePlexServers(w http.ResponseWriter, r *http.Request) {
 		APIKey   string `json:"api_key"`
 		Username string `json:"username"`
 		Password string `json:"password"`
+		TOTPCode string `json:"totp_code"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, err.Error(), 400)
 		return
 	}
-	servers, err := plextv.ListServers(body.APIKey, body.Username, body.Password)
+
+	w.Header().Set("Content-Type", "application/json")
+	token, servers, err := plextv.ListServers(body.APIKey, body.Username, body.Password, body.TOTPCode)
 	if err != nil {
+		if errors.Is(err, plextv.ErrTwoFactorRequired) {
+			json.NewEncoder(w).Encode(map[string]any{
+				"two_factor_required": true,
+			})
+			return
+		}
 		jsonError(w, err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(servers)
+	json.NewEncoder(w).Encode(map[string]any{
+		"token":   token,
+		"servers": servers,
+	})
 }
 
 func jsonError(w http.ResponseWriter, msg string) {

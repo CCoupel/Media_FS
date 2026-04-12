@@ -5,6 +5,7 @@ package plextv
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -25,6 +26,9 @@ func init() {
 	})
 }
 
+// ErrTwoFactorRequired is returned by signIn when plex.tv requires a TOTP code.
+var ErrTwoFactorRequired = errors.New("two-factor authentication required — enter your 6-digit TOTP code")
+
 // ServerInfo describes a Plex Media Server available on plex.tv.
 type ServerInfo struct {
 	Name      string `json:"name"`
@@ -32,22 +36,23 @@ type ServerInfo struct {
 	URL       string `json:"url"` // best resolved connection URL
 }
 
-// ListServers authenticates on plex.tv and returns all available Plex servers.
+// ListServers authenticates on plex.tv and returns (resolvedToken, servers).
 // apiKey (plex.tv account token) takes precedence over username/password.
-func ListServers(apiKey, username, password string) ([]ServerInfo, error) {
-	token := apiKey
-	if token == "" {
-		var err error
-		token, err = signIn(username, password)
+// totpCode is appended to the password when plex.tv requires 2FA (pass "" on first attempt).
+func ListServers(apiKey, username, password, totpCode string) (token string, servers []ServerInfo, err error) {
+	if apiKey != "" {
+		token = apiKey
+	} else {
+		token, err = signIn(username, password, totpCode)
 		if err != nil {
-			return nil, err
+			return "", nil, err
 		}
 	}
 	resources, err := fetchResources(token)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
-	servers := make([]ServerInfo, 0, len(resources))
+	servers = make([]ServerInfo, 0, len(resources))
 	for _, r := range resources {
 		bestURL := ""
 		if best := pickBestConnection(r.Connections); best != nil {
@@ -59,7 +64,7 @@ func ListServers(apiKey, username, password string) ([]ServerInfo, error) {
 			URL:       bestURL,
 		})
 	}
-	return servers, nil
+	return token, servers, nil
 }
 
 // Client resolves a Plex server via plex.tv then wraps a plex.Client.
@@ -69,18 +74,23 @@ type Client struct {
 
 func (c *Client) Connect(cfg config.ServerConfig) error {
 	if cfg.MachineID == "" {
-		return fmt.Errorf("plextv connect: machine_id is required (run 'mediafs plex-servers' to list available servers)")
+		return fmt.Errorf("plextv connect: machine_id is required")
 	}
 
-	// Step 1: obtain a plex.tv auth token
+	// Step 1: obtain a plex.tv auth token.
+	// When configured via the UI, api_key holds the token obtained during server
+	// selection (avoiding re-auth and 2FA issues at mount time).
 	var globalToken string
 	if cfg.APIKey != "" {
-		log.Printf("[plextv] using provided plex.tv token")
+		log.Printf("[plextv] using stored plex.tv token")
 		globalToken = cfg.APIKey
 	} else if cfg.Password != "" {
 		log.Printf("[plextv] authenticating on plex.tv for user %q", cfg.Username)
-		tok, err := signIn(cfg.Username, cfg.Password)
+		tok, err := signIn(cfg.Username, cfg.Password, "")
 		if err != nil {
+			if errors.Is(err, ErrTwoFactorRequired) {
+				return fmt.Errorf("plextv connect: %w — configure api_key with a plex.tv token instead of a password", err)
+			}
 			return fmt.Errorf("plextv connect: %w", err)
 		}
 		globalToken = tok
@@ -138,8 +148,8 @@ func (c *Client) Connect(cfg config.ServerConfig) error {
 
 // --- connector.MediaConnector — delegate to inner plex.Client ---
 
-func (c *Client) Ping() error                    { return c.inner.Ping() }
-func (c *Client) GetLibraries() ([]connector.Library, error) { return c.inner.GetLibraries() }
+func (c *Client) Ping() error                                           { return c.inner.Ping() }
+func (c *Client) GetLibraries() ([]connector.Library, error)           { return c.inner.GetLibraries() }
 func (c *Client) GetItems(libID, parentID string) ([]connector.MediaItem, error) {
 	return c.inner.GetItems(libID, parentID)
 }
@@ -178,10 +188,18 @@ type plexConnection struct {
 	IPv6     bool   `json:"IPv6"`
 }
 
-func signIn(username, password string) (string, error) {
+// signIn authenticates on plex.tv with username + password (+ optional TOTP code).
+// Following VirtualLib: the TOTP code is appended directly to the password (no separator).
+// Returns ErrTwoFactorRequired when plex.tv reports 2FA is needed and no totpCode was provided.
+func signIn(username, password, totpCode string) (string, error) {
+	effectivePassword := password
+	if totpCode != "" {
+		effectivePassword = password + strings.TrimSpace(totpCode)
+	}
+
 	form := url.Values{
 		"user[login]":    {username},
-		"user[password]": {password},
+		"user[password]": {effectivePassword},
 	}
 	client := &http.Client{Timeout: 15 * time.Second}
 	req, err := http.NewRequest("POST", plexTvBase+"/users/sign_in.json",
@@ -200,6 +218,15 @@ func signIn(username, password string) (string, error) {
 		return "", err
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusUnauthorized {
+		b, _ := io.ReadAll(resp.Body)
+		body := string(b)
+		if strings.Contains(strings.ToLower(body), "two_factor") && totpCode == "" {
+			return "", ErrTwoFactorRequired
+		}
+		return "", fmt.Errorf("plex.tv authentication failed (401): %s", body)
+	}
 	if resp.StatusCode >= 400 {
 		b, _ := io.ReadAll(resp.Body)
 		return "", fmt.Errorf("plex.tv sign_in failed (%d): %s", resp.StatusCode, b)
@@ -242,7 +269,6 @@ func fetchResources(token string) ([]plexResource, error) {
 		return nil, err
 	}
 
-	// Keep only server resources
 	var servers []plexResource
 	for _, r := range resources {
 		if strings.Contains(r.Provides, "server") {
@@ -253,13 +279,9 @@ func fetchResources(token string) ([]plexResource, error) {
 }
 
 // pickBestConnection selects the preferred connection following VirtualLib's priority:
-// 1. Non-local, non-relay (plex.direct), HTTPS
-// 2. Non-local, relay, HTTPS
-// 3. Local, HTTPS
-// 4. Any HTTP fallback
+// plex.direct non-local HTTPS > relay HTTPS > local HTTPS > HTTP variants.
 // IPv6 connections are excluded.
 func pickBestConnection(conns []plexConnection) *plexConnection {
-	// Filter out IPv6
 	var valid []plexConnection
 	for _, c := range conns {
 		if !c.IPv6 && c.URI != "" {
@@ -269,15 +291,12 @@ func pickBestConnection(conns []plexConnection) *plexConnection {
 	if len(valid) == 0 {
 		return nil
 	}
-
 	sort.SliceStable(valid, func(i, j int) bool {
 		return connectionScore(valid[i]) > connectionScore(valid[j])
 	})
 	return &valid[0]
 }
 
-// connectionScore returns a priority score (higher = preferred).
-// plex.direct non-local HTTPS > relay HTTPS > local HTTPS > HTTP variants
 func connectionScore(c plexConnection) int {
 	score := 0
 	if c.Protocol == "https" {
