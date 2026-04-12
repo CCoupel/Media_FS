@@ -233,31 +233,85 @@
     <div id="tab-deb" class="tab-panel">
       <div class="install-card">
         <div class="prereq"><strong data-i18n="install.prereq">Prérequis :</strong> <code>fuse3</code> (installé automatiquement comme dépendance)</div>
-        <pre><code># Télécharger le dernier .deb depuis GitHub Releases
-wget https://github.com/CCoupel/Media_FS/releases/latest/download/mediafs_X.Y.Z_linux_amd64.deb
+        <div class="step"><div class="step-num">1</div><div class="step-body"><strong data-i18n="install.linux1.title">Installer le package</strong>
+        <pre style="margin-top:.5rem"><code>wget https://github.com/CCoupel/Media_FS/releases/latest/download/mediafs_X.Y.Z_linux_amd64.deb
+sudo dpkg -i mediafs_X.Y.Z_linux_amd64.deb</code></pre>
+        </div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-body"><strong data-i18n="install.linux2.title">Créer le point de montage</strong>
+        <pre style="margin-top:.5rem"><code>sudo mkdir -p /mnt/mediafs</code></pre>
+        </div></div>
+        <div class="step"><div class="step-num">3</div><div class="step-body"><strong data-i18n="install.linux3.title">Configurer</strong>
+        <p data-i18n="install.linux3.body" style="margin-bottom:.5rem">Créez le fichier de configuration :</p>
+        <pre style="margin-top:.5rem"><code>mkdir -p ~/.config/Media_FS
+cat &gt; ~/.config/Media_FS/config.yaml &lt;&lt; 'EOF'
+mount:
+  mount_point: "/mnt/mediafs"
 
-# Installer
-sudo dpkg -i mediafs_X.Y.Z_linux_amd64.deb
+servers:
+  - alias: Jellyfin-Home
+    type: jellyfin
+    url: http://192.168.1.10:8096
+    username: cyril
+    api_key: "votre_api_key"
+    enabled: true
 
-# Démarrer
-mediafs mount</code></pre>
-        <p style="color:var(--text-dim);font-size:.85rem;margin-top:.75rem" data-i18n="install.deb_note">Le binaire est installé dans /usr/bin/mediafs. La dépendance fuse3 est déclarée dans le package.</p>
+download:
+  parallel_chunks: 4
+  chunk_size_mb: 16
+  read_ahead_window_mb: 64
+  read_ahead_windows: 2
+  max_cache_mb: 1024
+  cache_ttl_min: 60
+EOF</code></pre>
+        <p style="color:var(--text-dim);font-size:.82rem;margin-top:.5rem" data-i18n="install.linux3.apikey">L'API key se trouve dans le tableau de bord Jellyfin/Emby : <em>Administration → Clés API</em>.</p>
+        </div></div>
+        <div class="step"><div class="step-num">4</div><div class="step-body"><strong data-i18n="install.linux4.title">Monter</strong>
+        <pre style="margin-top:.5rem"><code>mediafs mount</code></pre>
+        <p style="color:var(--text-dim);font-size:.82rem;margin-top:.4rem" data-i18n="install.linux4.body">Ctrl+C pour démonter. Ajoutez à <code>~/.bashrc</code> ou un service systemd pour un démarrage automatique.</p>
+        </div></div>
+        <p style="color:var(--text-dim);font-size:.85rem;margin-top:.25rem" data-i18n="install.deb_note">Le binaire est installé dans /usr/bin/mediafs. La dépendance fuse3 est déclarée dans le package.</p>
       </div>
     </div>
 
     <div id="tab-rpm" class="tab-panel">
       <div class="install-card">
         <div class="prereq"><strong data-i18n="install.prereq">Prérequis :</strong> <code>fuse3</code> (installé automatiquement comme dépendance)</div>
-        <pre><code># Télécharger le dernier .rpm depuis GitHub Releases
-wget https://github.com/CCoupel/Media_FS/releases/latest/download/mediafs-X.Y.Z-1.x86_64.rpm
+        <div class="step"><div class="step-num">1</div><div class="step-body"><strong data-i18n="install.linux1.title">Installer le package</strong>
+        <pre style="margin-top:.5rem"><code>wget https://github.com/CCoupel/Media_FS/releases/latest/download/mediafs-X.Y.Z-1.x86_64.rpm
+sudo dnf install ./mediafs-X.Y.Z-1.x86_64.rpm   # Fedora / RHEL / Rocky</code></pre>
+        </div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-body"><strong data-i18n="install.linux2.title">Créer le point de montage</strong>
+        <pre style="margin-top:.5rem"><code>sudo mkdir -p /mnt/mediafs</code></pre>
+        </div></div>
+        <div class="step"><div class="step-num">3</div><div class="step-body"><strong data-i18n="install.linux3.title">Configurer</strong>
+        <p data-i18n="install.linux3.body" style="margin-bottom:.5rem">Créez le fichier de configuration :</p>
+        <pre style="margin-top:.5rem"><code>mkdir -p ~/.config/Media_FS
+cat &gt; ~/.config/Media_FS/config.yaml &lt;&lt; 'EOF'
+mount:
+  mount_point: "/mnt/mediafs"
 
-# Installer (Fedora / RHEL / Rocky…)
-sudo rpm -i mediafs-X.Y.Z-1.x86_64.rpm
-# ou
-sudo dnf install ./mediafs-X.Y.Z-1.x86_64.rpm
+servers:
+  - alias: Jellyfin-Home
+    type: jellyfin
+    url: http://192.168.1.10:8096
+    username: cyril
+    api_key: "votre_api_key"
+    enabled: true
 
-# Démarrer
-mediafs mount</code></pre>
+download:
+  parallel_chunks: 4
+  chunk_size_mb: 16
+  read_ahead_window_mb: 64
+  read_ahead_windows: 2
+  max_cache_mb: 1024
+  cache_ttl_min: 60
+EOF</code></pre>
+        <p style="color:var(--text-dim);font-size:.82rem;margin-top:.5rem" data-i18n="install.linux3.apikey">L'API key se trouve dans le tableau de bord Jellyfin/Emby : <em>Administration → Clés API</em>.</p>
+        </div></div>
+        <div class="step"><div class="step-num">4</div><div class="step-body"><strong data-i18n="install.linux4.title">Monter</strong>
+        <pre style="margin-top:.5rem"><code>mediafs mount</code></pre>
+        <p style="color:var(--text-dim);font-size:.82rem;margin-top:.4rem" data-i18n="install.linux4.body">Ctrl+C pour démonter. Ajoutez à <code>~/.bashrc</code> ou un service systemd pour un démarrage automatique.</p>
+        </div></div>
       </div>
     </div>
 
@@ -396,6 +450,13 @@ const T = {
     'install.prereq':'Prérequis :','install.winfsp_note':' — driver de système de fichiers en mode utilisateur pour Windows',
     'install.win1.title':'Installer WinFSP','install.win2.title':'Télécharger Media_FS',
     'install.win3.title':'Lancer l\'exécutable','install.win3.body':'Une icône apparaît dans la barre système. Clic droit → Configuration pour ajouter vos serveurs.',
+    'install.linux1.title':'Installer le package',
+    'install.linux2.title':'Créer le point de montage',
+    'install.linux3.title':'Configurer',
+    'install.linux3.body':'Créez le fichier de configuration :',
+    'install.linux3.apikey':'L\'API key se trouve dans le tableau de bord Jellyfin/Emby : <em>Administration → Clés API</em>.',
+    'install.linux4.title':'Monter',
+    'install.linux4.body':'Ctrl+C pour démonter. Ajoutez à <code>~/.bashrc</code> ou un service systemd pour un démarrage automatique.',
     'install.deb_note':'Le binaire est installé dans /usr/bin/mediafs. La dépendance fuse3 est déclarée dans le package.',
     'install.src.title':'Build depuis les sources','install.src.note':'CGO est obligatoire — cgofuse lie contre WinFSP ou libfuse.',
     'install.src.win':'Windows','install.src.linux':'Linux (Debian/Ubuntu)',
@@ -434,6 +495,13 @@ const T = {
     'install.prereq':'Requirements:','install.winfsp_note':' — user-mode filesystem driver for Windows',
     'install.win1.title':'Install WinFSP','install.win2.title':'Download Media_FS',
     'install.win3.title':'Run the executable','install.win3.body':'A tray icon appears. Right-click → Configuration to add your servers.',
+    'install.linux1.title':'Install the package',
+    'install.linux2.title':'Create the mount point',
+    'install.linux3.title':'Configure',
+    'install.linux3.body':'Create the configuration file:',
+    'install.linux3.apikey':'The API key is found in the Jellyfin/Emby dashboard: <em>Administration → API Keys</em>.',
+    'install.linux4.title':'Mount',
+    'install.linux4.body':'Ctrl+C to unmount. Add to <code>~/.bashrc</code> or a systemd service for automatic startup.',
     'install.deb_note':'The binary is installed at /usr/bin/mediafs. The fuse3 dependency is declared in the package.',
     'install.src.title':'Build from source','install.src.note':'CGO is required — cgofuse links against WinFSP or libfuse.',
     'install.src.win':'Windows','install.src.linux':'Linux (Debian/Ubuntu)',
