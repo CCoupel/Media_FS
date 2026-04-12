@@ -4,13 +4,15 @@
 package plextv
 
 import (
+	"bytes"
+	"crypto/md5"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
-	"net/url"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -19,6 +21,15 @@ import (
 	"github.com/CCoupel/Media_FS/internal/connector"
 	_ "github.com/CCoupel/Media_FS/internal/connector/plex" // ensure plex connector is registered
 )
+
+// plexClientID is a stable per-machine UUID derived from the hostname.
+// Plex requires a consistent UUID per client installation.
+var plexClientID = func() string {
+	host, _ := os.Hostname()
+	sum := md5.Sum([]byte("mediafs-" + host))
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
+		sum[0:4], sum[4:6], sum[6:8], sum[8:10], sum[10:16])
+}()
 
 func init() {
 	connector.Register(config.ConnectorPlexTV, func() connector.MediaConnector {
@@ -89,7 +100,7 @@ func (c *Client) Connect(cfg config.ServerConfig) error {
 		tok, err := signIn(cfg.Username, cfg.Password, "")
 		if err != nil {
 			if errors.Is(err, ErrTwoFactorRequired) {
-				return fmt.Errorf("plextv connect: %w — configure api_key with a plex.tv token instead of a password", err)
+				return fmt.Errorf("plextv connect: %w — use api_key with a plex.tv token instead of a password", err)
 			}
 			return fmt.Errorf("plextv connect: %w", err)
 		}
@@ -148,14 +159,10 @@ func (c *Client) Connect(cfg config.ServerConfig) error {
 
 // --- connector.MediaConnector — delegate to inner plex.Client ---
 
-func (c *Client) Ping() error                                           { return c.inner.Ping() }
-func (c *Client) GetLibraries() ([]connector.Library, error)           { return c.inner.GetLibraries() }
-func (c *Client) GetItems(libID, parentID string) ([]connector.MediaItem, error) {
-	return c.inner.GetItems(libID, parentID)
-}
-func (c *Client) GetItemMetadata(itemID string) (connector.ItemMetadata, error) {
-	return c.inner.GetItemMetadata(itemID)
-}
+func (c *Client) Ping() error                                                    { return c.inner.Ping() }
+func (c *Client) GetLibraries() ([]connector.Library, error)                    { return c.inner.GetLibraries() }
+func (c *Client) GetItems(libID, parentID string) ([]connector.MediaItem, error) { return c.inner.GetItems(libID, parentID) }
+func (c *Client) GetItemMetadata(itemID string) (connector.ItemMetadata, error)  { return c.inner.GetItemMetadata(itemID) }
 func (c *Client) GetArtworkURL(itemID string, artType connector.ArtworkType) (string, error) {
 	return c.inner.GetArtworkURL(itemID, artType)
 }
@@ -165,12 +172,6 @@ func (c *Client) GetFileSize(itemID string) (int64, error)   { return c.inner.Ge
 // --- plex.tv API ---
 
 const plexTvBase = "https://plex.tv"
-
-type plexTvSignInResponse struct {
-	User struct {
-		AuthToken string `json:"authToken"`
-	} `json:"user"`
-}
 
 type plexResource struct {
 	ClientIdentifier string           `json:"clientIdentifier"`
@@ -188,73 +189,84 @@ type plexConnection struct {
 	IPv6     bool   `json:"IPv6"`
 }
 
-// signIn authenticates on plex.tv with username + password (+ optional TOTP code).
-// Following VirtualLib: the TOTP code is appended directly to the password (no separator).
-// Returns ErrTwoFactorRequired when plex.tv reports 2FA is needed and no totpCode was provided.
+// addPlexTvHeaders adds the standard Plex identification headers required by plex.tv.
+// X-Plex-Client-Identifier must be a stable UUID per installation.
+func addPlexTvHeaders(req *http.Request) {
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("X-Plex-Product", "MediaFS")
+	req.Header.Set("X-Plex-Version", "1.0")
+	req.Header.Set("X-Plex-Client-Identifier", plexClientID)
+	req.Header.Set("X-Plex-Platform", "Windows")
+	req.Header.Set("X-Plex-Device", "PC")
+	req.Header.Set("X-Plex-Device-Name", "MediaFS")
+	req.Header.Set("X-Plex-Language", "en")
+}
+
+// signIn authenticates on plex.tv using the v2 JSON API.
+// Following VirtualLib: the TOTP code (when required) is appended directly to the password.
+// Returns ErrTwoFactorRequired when plex.tv signals 2FA is needed and totpCode was empty.
 func signIn(username, password, totpCode string) (string, error) {
 	effectivePassword := password
 	if totpCode != "" {
 		effectivePassword = password + strings.TrimSpace(totpCode)
 	}
 
-	form := url.Values{
-		"user[login]":    {username},
-		"user[password]": {effectivePassword},
-	}
-	client := &http.Client{Timeout: 15 * time.Second}
-	req, err := http.NewRequest("POST", plexTvBase+"/users/sign_in.json",
-		strings.NewReader(form.Encode()))
+	payload, _ := json.Marshal(map[string]any{
+		"login":      username,
+		"password":   effectivePassword,
+		"rememberMe": true,
+	})
+
+	httpClient := &http.Client{Timeout: 15 * time.Second}
+	req, err := http.NewRequest("POST", plexTvBase+"/api/v2/users/signin", bytes.NewReader(payload))
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("X-Plex-Product", "MediaFS")
-	req.Header.Set("X-Plex-Client-Identifier", "mediafs-cli")
-	req.Header.Set("X-Plex-Version", "1.0")
-	req.Header.Set("Accept", "application/json")
+	addPlexTvHeaders(req)
+	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode == http.StatusUnauthorized {
-		b, _ := io.ReadAll(resp.Body)
-		body := string(b)
-		if strings.Contains(strings.ToLower(body), "two_factor") && totpCode == "" {
+		bodyLower := strings.ToLower(string(body))
+		// Plex v2 2FA: error code 1029, or "two_factor" in body
+		if totpCode == "" && (strings.Contains(bodyLower, "two_factor") || strings.Contains(bodyLower, "1029")) {
 			return "", ErrTwoFactorRequired
 		}
-		return "", fmt.Errorf("plex.tv authentication failed (401): %s", body)
+		return "", fmt.Errorf("plex.tv authentication failed (401): %s", string(body))
 	}
 	if resp.StatusCode >= 400 {
-		b, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("plex.tv sign_in failed (%d): %s", resp.StatusCode, b)
+		return "", fmt.Errorf("plex.tv sign_in failed (%d): %s", resp.StatusCode, string(body))
 	}
 
-	var result plexTvSignInResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	// v2 response: authToken at root level (not nested in "user")
+	var result struct {
+		AuthToken string `json:"authToken"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
 		return "", err
 	}
-	if result.User.AuthToken == "" {
+	if result.AuthToken == "" {
 		return "", fmt.Errorf("empty authToken in plex.tv response")
 	}
-	return result.User.AuthToken, nil
+	return result.AuthToken, nil
 }
 
 func fetchResources(token string) ([]plexResource, error) {
 	u := fmt.Sprintf("%s/api/v2/resources?includeHttps=1&includeRelay=1&X-Plex-Token=%s", plexTvBase, token)
-	client := &http.Client{Timeout: 15 * time.Second}
+	httpClient := &http.Client{Timeout: 15 * time.Second}
 	req, err := http.NewRequest("GET", u, nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("X-Plex-Product", "MediaFS")
-	req.Header.Set("X-Plex-Client-Identifier", "mediafs-cli")
-	req.Header.Set("X-Plex-Version", "1.0")
-	req.Header.Set("Accept", "application/json")
+	addPlexTvHeaders(req)
 
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
