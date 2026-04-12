@@ -253,8 +253,9 @@ func (fs *MediaFS) Readdir(path string,
 		}
 		fill(it.VFSName(), st, 0)
 
-		// Inject virtual sidecar files (.nfo + artwork).
-		// Use cached sizes when warm so directory listings reflect real sizes.
+		// Inject virtual sidecar files (.nfo + artwork) — only for leaf media
+		// files, not for folder items. Movie folders expose their sidecars
+		// inside the folder (next to the actual media file).
 		base := it.Name // sidecar base = title without extension
 		if !it.IsFolder {
 			nfoSize := int64(1024)
@@ -262,15 +263,15 @@ func (fs *MediaFS) Readdir(path string,
 				nfoSize = int64(len(cached.([]byte)))
 			}
 			fill(base+".nfo", &fuse.Stat_t{Mode: fuse.S_IFREG | 0444, Size: nfoSize}, 0)
-		}
-		for _, artFile := range connector.ArtworkFilenames(it.Type) {
-			artSize := int64(51200)
-			if artType, ok := connector.ArtworkTypeForFilename(artFile); ok {
-				if data, cached, _ := fs.cache.GetArtwork(parts[0], it.ID, string(artType)); cached {
-					artSize = int64(len(data))
+			for _, artFile := range connector.ArtworkFilenames(it.Type) {
+				artSize := int64(51200)
+				if artType, ok := connector.ArtworkTypeForFilename(artFile); ok {
+					if data, cached, _ := fs.cache.GetArtwork(parts[0], it.ID, string(artType)); cached {
+						artSize = int64(len(data))
+					}
 				}
+				fill(base+"-"+artFile, &fuse.Stat_t{Mode: fuse.S_IFREG | 0444, Size: artSize}, 0)
 			}
-			fill(base+"-"+artFile, &fuse.Stat_t{Mode: fuse.S_IFREG | 0444, Size: artSize}, 0)
 		}
 	}
 	return 0
@@ -652,6 +653,9 @@ func (fs *MediaFS) resolveArtworkItem(parts []string) (*connector.MediaItem, con
 		return nil, "", err
 	}
 	for i := range items {
+		if items[i].IsFolder {
+			continue // artwork lives inside the folder, not next to it
+		}
 		base := strings.TrimSuffix(items[i].Name, extensionOf(items[i].Name))
 		if base == itemBase {
 			return &items[i], artType, nil

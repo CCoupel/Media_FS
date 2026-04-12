@@ -150,6 +150,9 @@ func buildMovieFolders(rawItems []xmlItem) []connector.MediaItem {
 	groups := make(map[string]*group)
 
 	for _, it := range rawItems {
+		if it.RatingKey == "" {
+			continue // skip malformed Plex items (e.g. collection placeholders)
+		}
 		name := movieFolderName(it)
 		if _, exists := groups[name]; !exists {
 			order = append(order, name)
