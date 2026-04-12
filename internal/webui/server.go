@@ -273,14 +273,12 @@ func (s *Server) handleSave(w http.ResponseWriter, r *http.Request) {
 	}
 	// Optionally update general settings from the form body
 	var settings struct {
-		DriveLetter       string `json:"drive_letter"`
-		MountPoint        string `json:"mount_point"`
-		ParallelChunks    int    `json:"parallel_chunks"`
-		ChunkSizeMB       int    `json:"chunk_size_mb"`
-		ReadAheadWindowMB int    `json:"read_ahead_window_mb"`
-		ReadAheadWindows  int    `json:"read_ahead_windows"`
-		MaxCacheMB        int    `json:"max_cache_mb"`
-		CacheTTLMin       int    `json:"cache_ttl_min"`
+		DriveLetter    string `json:"drive_letter"`
+		MountPoint     string `json:"mount_point"`
+		ParallelChunks int    `json:"parallel_chunks"`
+		ChunkSizeMB    int    `json:"chunk_size_mb"`
+		MaxCacheMB     int    `json:"max_cache_mb"`
+		CacheTTLMin    int    `json:"cache_ttl_min"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&settings); err == nil {
 		if settings.DriveLetter != "" {
@@ -294,12 +292,6 @@ func (s *Server) handleSave(w http.ResponseWriter, r *http.Request) {
 		}
 		if settings.ChunkSizeMB > 0 {
 			s.cfg.Download.ChunkSizeMB = settings.ChunkSizeMB
-		}
-		if settings.ReadAheadWindowMB > 0 {
-			s.cfg.Download.ReadAheadWindowMB = settings.ReadAheadWindowMB
-		}
-		if settings.ReadAheadWindows > 0 {
-			s.cfg.Download.ReadAheadWindows = settings.ReadAheadWindows
 		}
 		if settings.MaxCacheMB > 0 {
 			s.cfg.Download.MaxCacheMB = settings.MaxCacheMB

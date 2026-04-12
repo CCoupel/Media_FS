@@ -54,14 +54,12 @@ func runTray() {
 	defer cacheInst.Close()
 
 	dl := &downloader.Downloader{
-		ParallelChunks:    cfg.Download.ParallelChunks,
-		ChunkSizeMB:       cfg.Download.ChunkSizeMB,
-		BufferSizeKB:      cfg.Download.BufferSizeKB,
-		ReadAheadWindowMB: cfg.Download.ReadAheadWindowMB,
-		ReadAheadWindows:  cfg.Download.ReadAheadWindows,
-		MaxCacheMB:        cfg.Download.MaxCacheMB,
-		CacheTTLMin:       cfg.Download.CacheTTLMin,
-		HTTPClient:        &http.Client{Timeout: 0}, // no timeout for streaming
+		ParallelChunks: cfg.Download.ParallelChunks,
+		ChunkSizeMB:    cfg.Download.ChunkSizeMB,
+		BufferSizeKB:   cfg.Download.BufferSizeKB,
+		MaxCacheMB:     cfg.Download.MaxCacheMB,
+		CacheTTLMin:    cfg.Download.CacheTTLMin,
+		HTTPClient:     &http.Client{Timeout: 0}, // no timeout for streaming
 	}
 	dl.Init()
 	defer dl.WindowCache.Close()
@@ -237,14 +235,12 @@ func runMount(keys []string) {
 	defer cacheInst.Close()
 
 	dl := &downloader.Downloader{
-		ParallelChunks:    cfg.Download.ParallelChunks,
-		ChunkSizeMB:       cfg.Download.ChunkSizeMB,
-		BufferSizeKB:      cfg.Download.BufferSizeKB,
-		ReadAheadWindowMB: cfg.Download.ReadAheadWindowMB,
-		ReadAheadWindows:  cfg.Download.ReadAheadWindows,
-		MaxCacheMB:        cfg.Download.MaxCacheMB,
-		CacheTTLMin:       cfg.Download.CacheTTLMin,
-		HTTPClient:        &http.Client{Timeout: 0},
+		ParallelChunks: cfg.Download.ParallelChunks,
+		ChunkSizeMB:    cfg.Download.ChunkSizeMB,
+		BufferSizeKB:   cfg.Download.BufferSizeKB,
+		MaxCacheMB:     cfg.Download.MaxCacheMB,
+		CacheTTLMin:    cfg.Download.CacheTTLMin,
+		HTTPClient:     &http.Client{Timeout: 0},
 	}
 	dl.Init()
 	defer dl.WindowCache.Close()

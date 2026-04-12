@@ -28,14 +28,19 @@ type ServerConfig struct {
 	Enabled   bool          `yaml:"enabled"              json:"enabled"`
 }
 
+// DownloadConfig controls both parallel download and streaming read-ahead.
+// ChunkSizeMB is the fundamental unit: one chunk = one HTTP Range request = one in-memory window.
+// ParallelChunks controls both download concurrency and the number of prefetch windows per file.
 type DownloadConfig struct {
-	ParallelChunks    int `yaml:"parallel_chunks"`
-	ChunkSizeMB       int `yaml:"chunk_size_mb"`
-	BufferSizeKB      int `yaml:"buffer_size_kb"`
-	ReadAheadWindowMB int `yaml:"read_ahead_window_mb"`
-	ReadAheadWindows  int `yaml:"read_ahead_windows"`
-	MaxCacheMB        int `yaml:"max_cache_mb"`
-	CacheTTLMin       int `yaml:"cache_ttl_min"`
+	ParallelChunks int `yaml:"parallel_chunks"` // parallel Range requests; also = read-ahead window count
+	ChunkSizeMB    int `yaml:"chunk_size_mb"`   // size of each chunk/window in MB
+	BufferSizeKB   int `yaml:"buffer_size_kb"`  // internal I/O read buffer
+	MaxCacheMB     int `yaml:"max_cache_mb"`    // total in-memory window cache limit
+	CacheTTLMin    int `yaml:"cache_ttl_min"`   // eviction TTL for cached windows
+
+	// Deprecated: ignored, kept for config file backward-compatibility.
+	ReadAheadWindowMB int `yaml:"read_ahead_window_mb,omitempty"`
+	ReadAheadWindows  int `yaml:"read_ahead_windows,omitempty"`
 }
 
 type CacheConfig struct {
@@ -63,13 +68,11 @@ func DefaultConfig() *Config {
 			MountPoint:  "/mnt/mediafs",
 		},
 		Download: DownloadConfig{
-			ParallelChunks:    4,
-			ChunkSizeMB:       64,
-			BufferSizeKB:      256,
-			ReadAheadWindowMB: 64,
-			ReadAheadWindows:  2,
-			MaxCacheMB:        2048,
-			CacheTTLMin:       120,
+			ParallelChunks: 4,
+			ChunkSizeMB:    64,
+			BufferSizeKB:   256,
+			MaxCacheMB:     2048,
+			CacheTTLMin:    120,
 		},
 		Cache: CacheConfig{
 			TTLItemsSec:   300,

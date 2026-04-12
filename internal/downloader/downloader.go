@@ -10,18 +10,18 @@ import (
 	"golang.org/x/sync/singleflight"
 )
 
-// Downloader fetches a remote file in parallel chunks via HTTP Range requests.
+// Downloader fetches remote files via HTTP Range requests.
+// ChunkSizeMB is the single unit for both parallel downloads and streaming windows.
+// ParallelChunks controls download concurrency and the number of prefetch windows per open file.
 type Downloader struct {
-	ParallelChunks    int
-	ChunkSizeMB       int
-	BufferSizeKB      int
-	ReadAheadWindowMB int
-	ReadAheadWindows  int
-	MaxCacheMB        int
-	CacheTTLMin       int
-	HTTPClient        *http.Client
-	WindowCache       *WindowCache       // initialised by Init()
-	sf                singleflight.Group // deduplicates concurrent identical chunk fetches
+	ParallelChunks int
+	ChunkSizeMB    int
+	BufferSizeKB   int
+	MaxCacheMB     int
+	CacheTTLMin    int
+	HTTPClient     *http.Client
+	WindowCache    *WindowCache       // initialised by Init()
+	sf             singleflight.Group // deduplicates concurrent identical chunk fetches
 }
 
 // Init creates the WindowCache. Must be called once after all fields are set.

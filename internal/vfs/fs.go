@@ -375,10 +375,10 @@ func (fs *MediaFS) Open(path string, flags int) (int, uint64) {
 	}
 
 	var reader *downloader.ReadAheadReader
-	if item.FileSize > 0 && fs.dl.ReadAheadWindows > 0 {
+	if item.FileSize > 0 && fs.dl.ParallelChunks > 0 {
 		reader = downloader.NewReadAheadReader(
 			streamURL, streamHdrs, item.FileSize, fs.dl,
-			fs.dl.ReadAheadWindowMB, fs.dl.ReadAheadWindows,
+			fs.dl.ChunkSizeMB, fs.dl.ParallelChunks,
 		)
 	}
 

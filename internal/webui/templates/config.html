@@ -225,20 +225,14 @@
           <input id="s-mount" type="text" value="{{.MountConfig.MountPoint}}">
         </div>
         <div>
-          <label>Chunks parallèles (téléchargement)</label>
+          <label>Chunks parallèles</label>
+          <small>Concurrence téléchargement = fenêtres pré-chargées en RAM</small>
           <input id="s-chunks" type="number" min="1" max="16" value="{{.Download.ParallelChunks}}">
         </div>
         <div>
           <label>Taille chunk (MB)</label>
+          <small>Unité de base : taille d'une requête Range = d'une fenêtre en RAM</small>
           <input id="s-chunksize" type="number" min="8" max="512" value="{{.Download.ChunkSizeMB}}">
-        </div>
-        <div>
-          <label>Taille fenêtre pré-chargement (MB)</label>
-          <input id="s-winsize" type="number" min="8" max="512" value="{{.Download.ReadAheadWindowMB}}">
-        </div>
-        <div>
-          <label>Fenêtres en mémoire (read-ahead)</label>
-          <input id="s-wincount" type="number" min="1" max="8" value="{{.Download.ReadAheadWindows}}">
         </div>
       </div>
     </div>
@@ -723,10 +717,8 @@ async function saveConfig() {
     drive_letter:         document.getElementById('s-drive').value,
     mount_point:          document.getElementById('s-mount').value,
     parallel_chunks:      parseInt(document.getElementById('s-chunks').value) || 0,
-    chunk_size_mb:        parseInt(document.getElementById('s-chunksize').value) || 0,
-    read_ahead_window_mb: parseInt(document.getElementById('s-winsize').value) || 0,
-    read_ahead_windows:   parseInt(document.getElementById('s-wincount').value) || 0,
-    max_cache_mb:         parseInt(document.getElementById('s-maxcache').value) || 0,
+    chunk_size_mb:  parseInt(document.getElementById('s-chunksize').value) || 0,
+    max_cache_mb:   parseInt(document.getElementById('s-maxcache').value) || 0,
     cache_ttl_min:        parseInt(document.getElementById('s-cachettl').value) || 0,
   };
   const r = await fetch('/api/save', {method: 'POST', body: JSON.stringify(settings)});
