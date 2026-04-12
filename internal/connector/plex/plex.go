@@ -408,7 +408,9 @@ func (c *Client) GetStreamURL(itemID string) (string, error) {
 	if partKey == "" {
 		return "", fmt.Errorf("no Part key found for item %s", itemID)
 	}
-	return fmt.Sprintf("%s%s?X-Plex-Token=%s", c.baseURL, partKey, c.token), nil
+	// download=1 is required for Plex to serve the raw file with Range support.
+	// Without it some PMS versions return HTTP 500 on Range requests.
+	return fmt.Sprintf("%s%s?X-Plex-Token=%s&download=1", c.baseURL, partKey, c.token), nil
 }
 
 func (c *Client) GetFileSize(itemID string) (int64, error) {
@@ -417,6 +419,17 @@ func (c *Client) GetFileSize(itemID string) (int64, error) {
 		return 0, err
 	}
 	return meta.FileSize, nil
+}
+
+// GetStreamHeaders returns the HTTP headers Plex requires on streaming Range requests.
+// These must accompany every request to the Plex streaming endpoint.
+func (c *Client) GetStreamHeaders() map[string]string {
+	return map[string]string{
+		"X-Plex-Token":             c.token,
+		"X-Plex-Product":           "MediaFS",
+		"X-Plex-Client-Identifier": "mediafs-cli",
+		"X-Plex-Version":           "1.0",
+	}
 }
 
 // --- XML data types ---

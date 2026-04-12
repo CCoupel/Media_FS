@@ -45,12 +45,13 @@ type MediaFS struct {
 }
 
 type fileHandle struct {
-	streamURL  string
-	fileSize   int64
-	serverKey  string
-	nfoContent []byte // non-nil: virtual .nfo/.artwork file; served from memory
-	path       string
-	reader     *downloader.ReadAheadReader // nil for small/virtual files
+	streamURL   string
+	streamHdrs  map[string]string // extra HTTP headers for Range requests (e.g. Plex)
+	fileSize    int64
+	serverKey   string
+	nfoContent  []byte // non-nil: virtual .nfo/.artwork file; served from memory
+	path        string
+	reader      *downloader.ReadAheadReader // nil for small/virtual files
 }
 
 // New creates a MediaFS instance.
@@ -367,10 +368,16 @@ func (fs *MediaFS) Open(path string, flags int) (int, uint64) {
 	}
 	log.Printf("[vfs] Open %s size=%d url=%s", path, item.FileSize, streamURL)
 
+	// Collect optional streaming headers (e.g. Plex X-Plex-* identifiers).
+	var streamHdrs map[string]string
+	if p, ok := srv.Conn.(connector.StreamHeadersProvider); ok {
+		streamHdrs = p.GetStreamHeaders()
+	}
+
 	var reader *downloader.ReadAheadReader
 	if item.FileSize > 0 && fs.dl.ReadAheadWindows > 0 {
 		reader = downloader.NewReadAheadReader(
-			streamURL, nil, item.FileSize, fs.dl,
+			streamURL, streamHdrs, item.FileSize, fs.dl,
 			fs.dl.ReadAheadWindowMB, fs.dl.ReadAheadWindows,
 		)
 	}
@@ -379,11 +386,12 @@ func (fs *MediaFS) Open(path string, flags int) (int, uint64) {
 	fh := fs.nextFH
 	fs.nextFH++
 	fs.handles[fh] = &fileHandle{
-		streamURL: streamURL,
-		fileSize:  item.FileSize,
-		serverKey: parts[0],
-		path:      path,
-		reader:    reader,
+		streamURL:  streamURL,
+		streamHdrs: streamHdrs,
+		fileSize:   item.FileSize,
+		serverKey:  parts[0],
+		path:       path,
+		reader:     reader,
 	}
 	fs.handlesMu.Unlock()
 
@@ -426,7 +434,7 @@ func (fs *MediaFS) Read(path string, buf []byte, ofst int64, fh uint64) int {
 		return n
 	}
 
-	data, err := fs.dl.ReadAt(h.streamURL, nil, ofst, length)
+	data, err := fs.dl.ReadAt(h.streamURL, h.streamHdrs, ofst, length)
 	if err != nil {
 		log.Printf("[vfs] Read %s ofst=%d len=%d: HTTP error: %v", h.path, ofst, length, err)
 		return -fuse.EIO

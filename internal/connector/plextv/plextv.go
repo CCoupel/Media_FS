@@ -169,6 +169,14 @@ func (c *Client) GetArtworkURL(itemID string, artType connector.ArtworkType) (st
 func (c *Client) GetStreamURL(itemID string) (string, error) { return c.inner.GetStreamURL(itemID) }
 func (c *Client) GetFileSize(itemID string) (int64, error)   { return c.inner.GetFileSize(itemID) }
 
+// GetStreamHeaders delegates to the inner connector's StreamHeadersProvider if it implements it.
+func (c *Client) GetStreamHeaders() map[string]string {
+	if p, ok := c.inner.(connector.StreamHeadersProvider); ok {
+		return p.GetStreamHeaders()
+	}
+	return nil
+}
+
 // --- plex.tv API ---
 
 const plexTvBase = "https://plex.tv"
