@@ -45,12 +45,13 @@ type MediaFS struct {
 }
 
 type fileHandle struct {
-	streamURL  string
-	fileSize   int64
-	serverKey  string
-	nfoContent []byte // non-nil: virtual .nfo/.artwork file; served from memory
-	path       string
-	reader     *downloader.ReadAheadReader // nil for small/virtual files
+	streamURL   string
+	streamHdrs  map[string]string // extra HTTP headers for Range requests (e.g. Plex)
+	fileSize    int64
+	serverKey   string
+	nfoContent  []byte // non-nil: virtual .nfo/.artwork file; served from memory
+	path        string
+	reader      *downloader.ReadAheadReader // nil for small/virtual files
 }
 
 // New creates a MediaFS instance.
@@ -174,14 +175,17 @@ func (fs *MediaFS) Getattr(path string, stat *fuse.Stat_t, fh uint64) int {
 	} else {
 		stat.Mode = fuse.S_IFREG | 0444
 		stat.Size = item.FileSize
-		// Use cached metadata for PremiereDate/Year if available (warmed by NFO Getattr).
-		// If cold, trigger background fetch so next Getattr will have it.
+		// Use cached metadata for PremiereDate/Year and, when the items listing
+		// did not carry a file size (Plex omits it for some entries), for FileSize.
 		premiereDate := item.PremiereDate
 		productionYear := item.ProductionYear
 		var meta connector.ItemMetadata
 		if ok, _ := fs.cache.GetMetadata(parts[0], item.ID, &meta); ok {
 			premiereDate = meta.PremiereDate
 			productionYear = meta.Year
+			if stat.Size == 0 && meta.FileSize > 0 {
+				stat.Size = meta.FileSize
+			}
 		} else {
 			srv := fs.serverForKey(parts[0])
 			if srv != nil {
@@ -253,8 +257,9 @@ func (fs *MediaFS) Readdir(path string,
 		}
 		fill(it.VFSName(), st, 0)
 
-		// Inject virtual sidecar files (.nfo + artwork).
-		// Use cached sizes when warm so directory listings reflect real sizes.
+		// Inject virtual sidecar files (.nfo + artwork) — only for leaf media
+		// files, not for folder items. Movie folders expose their sidecars
+		// inside the folder (next to the actual media file).
 		base := it.Name // sidecar base = title without extension
 		if !it.IsFolder {
 			nfoSize := int64(1024)
@@ -262,15 +267,15 @@ func (fs *MediaFS) Readdir(path string,
 				nfoSize = int64(len(cached.([]byte)))
 			}
 			fill(base+".nfo", &fuse.Stat_t{Mode: fuse.S_IFREG | 0444, Size: nfoSize}, 0)
-		}
-		for _, artFile := range connector.ArtworkFilenames(it.Type) {
-			artSize := int64(51200)
-			if artType, ok := connector.ArtworkTypeForFilename(artFile); ok {
-				if data, cached, _ := fs.cache.GetArtwork(parts[0], it.ID, string(artType)); cached {
-					artSize = int64(len(data))
+			for _, artFile := range connector.ArtworkFilenames(it.Type) {
+				artSize := int64(51200)
+				if artType, ok := connector.ArtworkTypeForFilename(artFile); ok {
+					if data, cached, _ := fs.cache.GetArtwork(parts[0], it.ID, string(artType)); cached {
+						artSize = int64(len(data))
+					}
 				}
+				fill(base+"-"+artFile, &fuse.Stat_t{Mode: fuse.S_IFREG | 0444, Size: artSize}, 0)
 			}
-			fill(base+"-"+artFile, &fuse.Stat_t{Mode: fuse.S_IFREG | 0444, Size: artSize}, 0)
 		}
 	}
 	return 0
@@ -358,13 +363,21 @@ func (fs *MediaFS) Open(path string, flags int) (int, uint64) {
 
 	streamURL, err := srv.Conn.GetStreamURL(item.ID)
 	if err != nil {
+		log.Printf("[vfs] Open %s: GetStreamURL error: %v", path, err)
 		return -fuse.EIO, ^uint64(0)
+	}
+	log.Printf("[vfs] Open %s size=%d url=%s", path, item.FileSize, streamURL)
+
+	// Collect optional streaming headers (e.g. Plex X-Plex-* identifiers).
+	var streamHdrs map[string]string
+	if p, ok := srv.Conn.(connector.StreamHeadersProvider); ok {
+		streamHdrs = p.GetStreamHeaders()
 	}
 
 	var reader *downloader.ReadAheadReader
 	if item.FileSize > 0 && fs.dl.ReadAheadWindows > 0 {
 		reader = downloader.NewReadAheadReader(
-			streamURL, nil, item.FileSize, fs.dl,
+			streamURL, streamHdrs, item.FileSize, fs.dl,
 			fs.dl.ReadAheadWindowMB, fs.dl.ReadAheadWindows,
 		)
 	}
@@ -373,11 +386,12 @@ func (fs *MediaFS) Open(path string, flags int) (int, uint64) {
 	fh := fs.nextFH
 	fs.nextFH++
 	fs.handles[fh] = &fileHandle{
-		streamURL: streamURL,
-		fileSize:  item.FileSize,
-		serverKey: parts[0],
-		path:      path,
-		reader:    reader,
+		streamURL:  streamURL,
+		streamHdrs: streamHdrs,
+		fileSize:   item.FileSize,
+		serverKey:  parts[0],
+		path:       path,
+		reader:     reader,
 	}
 	fs.handlesMu.Unlock()
 
@@ -401,23 +415,28 @@ func (fs *MediaFS) Read(path string, buf []byte, ofst int64, fh uint64) int {
 	}
 
 	length := int64(len(buf))
-	if ofst+length > h.fileSize {
+	// Only clamp to the known file size when we have a reliable value.
+	// When fileSize == 0 (Plex did not report a size), let the HTTP layer
+	// determine how many bytes are available rather than returning EOF immediately.
+	if h.fileSize > 0 && ofst+length > h.fileSize {
 		length = h.fileSize - ofst
-	}
-	if length <= 0 {
-		return 0
+		if length <= 0 {
+			return 0
+		}
 	}
 
 	if h.reader != nil {
 		n, err := h.reader.ReadAt(buf[:length], ofst)
 		if err != nil {
+			log.Printf("[vfs] Read %s ofst=%d len=%d: ReadAhead error: %v", h.path, ofst, length, err)
 			return -fuse.EIO
 		}
 		return n
 	}
 
-	data, err := fs.dl.ReadAt(h.streamURL, nil, ofst, length)
+	data, err := fs.dl.ReadAt(h.streamURL, h.streamHdrs, ofst, length)
 	if err != nil {
+		log.Printf("[vfs] Read %s ofst=%d len=%d: HTTP error: %v", h.path, ofst, length, err)
 		return -fuse.EIO
 	}
 	return copy(buf, data)
@@ -652,6 +671,9 @@ func (fs *MediaFS) resolveArtworkItem(parts []string) (*connector.MediaItem, con
 		return nil, "", err
 	}
 	for i := range items {
+		if items[i].IsFolder {
+			continue // artwork lives inside the folder, not next to it
+		}
 		base := strings.TrimSuffix(items[i].Name, extensionOf(items[i].Name))
 		if base == itemBase {
 			return &items[i], artType, nil
@@ -748,9 +770,14 @@ func (fs *MediaFS) generateNFO(serverKey string, item *connector.MediaItem) ([]b
 }
 
 func (fs *MediaFS) listItemsCached(serverKey, libID, parentID string) ([]connector.MediaItem, error) {
-	cacheKey := parentID
-	if cacheKey == "" {
+	// Cache key must be scoped to the library to avoid collisions between
+	// Plex section IDs (small integers like "1","2","3") and item ratingKeys
+	// that happen to have the same value.
+	var cacheKey string
+	if parentID == "" {
 		cacheKey = libID
+	} else {
+		cacheKey = libID + "|" + parentID
 	}
 
 	var items []connector.MediaItem

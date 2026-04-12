@@ -109,7 +109,8 @@ func (d *Downloader) doFetch(url string, start, end int64, headers map[string]st
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end))
+	rangeHdr := fmt.Sprintf("bytes=%d-%d", start, end)
+	req.Header.Set("Range", rangeHdr)
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
@@ -121,7 +122,8 @@ func (d *Downloader) doFetch(url string, start, end int64, headers map[string]st
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusPartialContent && resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status %d", resp.StatusCode)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return nil, fmt.Errorf("unexpected status %d for Range:%s (body: %s)", resp.StatusCode, rangeHdr, string(body))
 	}
 
 	bufSize := d.BufferSizeKB * 1024

@@ -5,6 +5,7 @@ package webui
 import (
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"net"
@@ -17,6 +18,8 @@ import (
 	"github.com/CCoupel/Media_FS/internal/connector"
 	_ "github.com/CCoupel/Media_FS/internal/connector/emby"
 	_ "github.com/CCoupel/Media_FS/internal/connector/jellyfin"
+	_ "github.com/CCoupel/Media_FS/internal/connector/plex"
+	"github.com/CCoupel/Media_FS/internal/connector/plextv"
 	"github.com/CCoupel/Media_FS/internal/downloader"
 	"github.com/CCoupel/Media_FS/internal/syscheck"
 	"github.com/CCoupel/Media_FS/internal/version"
@@ -123,6 +126,7 @@ func (s *Server) Start() {
 	mux.HandleFunc("/api/monitor/purge-window", s.handlePurgeWindow)
 	mux.HandleFunc("/api/config-session", s.handleConfigSession)
 	mux.HandleFunc("/api/system/status", s.handleSystemStatus)
+	mux.HandleFunc("/api/plex/servers", s.handlePlexServers)
 
 	go http.Serve(s.listener, mux) //nolint:errcheck
 }
@@ -232,25 +236,28 @@ func (s *Server) handleTestServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 1 — reachability: hit the public info endpoint (no auth required)
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get(srv.URL + "/System/Info/Public")
-	if err != nil {
-		writeTestLevel(w, "unreachable", err.Error())
-		return
-	}
-	resp.Body.Close()
-	if resp.StatusCode >= 500 {
-		writeTestLevel(w, "unreachable", fmt.Sprintf("server error %d", resp.StatusCode))
-		return
-	}
-
-	// Step 2 — authentication: Connect resolves the user ID (requires valid API key)
 	conn := connector.New(srv.Type)
 	if conn == nil {
 		writeTestLevel(w, "unreachable", fmt.Sprintf("type inconnu : %s", srv.Type))
 		return
 	}
+
+	// For Jellyfin/Emby: pre-check reachability without credentials first.
+	// For Plex/PlexTV: Connect() already calls Ping() internally, no pre-check needed.
+	if srv.Type == config.ConnectorJellyfin || srv.Type == config.ConnectorEmby {
+		client := &http.Client{Timeout: 5 * time.Second}
+		resp, err := client.Get(srv.URL + "/System/Info/Public")
+		if err != nil {
+			writeTestLevel(w, "unreachable", err.Error())
+			return
+		}
+		resp.Body.Close()
+		if resp.StatusCode >= 500 {
+			writeTestLevel(w, "unreachable", fmt.Sprintf("server error %d", resp.StatusCode))
+			return
+		}
+	}
+
 	if err := conn.Connect(srv); err != nil {
 		writeTestLevel(w, "auth_error", err.Error())
 		return
@@ -386,6 +393,40 @@ func (s *Server) handleSystemStatus(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"winfsp": syscheck.CheckWinFSP(),
+	})
+}
+
+func (s *Server) handlePlexServers(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST required", 405)
+		return
+	}
+	var body struct {
+		APIKey   string `json:"api_key"`
+		Username string `json:"username"`
+		Password string `json:"password"`
+		TOTPCode string `json:"totp_code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	token, servers, err := plextv.ListServers(body.APIKey, body.Username, body.Password, body.TOTPCode)
+	if err != nil {
+		if errors.Is(err, plextv.ErrTwoFactorRequired) {
+			json.NewEncoder(w).Encode(map[string]any{
+				"two_factor_required": true,
+			})
+			return
+		}
+		jsonError(w, err.Error())
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]any{
+		"token":   token,
+		"servers": servers,
 	})
 }
 

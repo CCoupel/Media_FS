@@ -140,6 +140,13 @@ func ArtworkTypeForFilename(filename string) (ArtworkType, bool) {
 	}
 }
 
+// StreamHeadersProvider is an optional interface for connectors that require
+// custom HTTP headers on streaming Range requests (e.g. Plex client identification).
+// The VFS checks for this interface on Open and passes the headers to the downloader.
+type StreamHeadersProvider interface {
+	GetStreamHeaders() map[string]string
+}
+
 // Factory is a function that creates a new connector instance.
 type Factory func() MediaConnector
 

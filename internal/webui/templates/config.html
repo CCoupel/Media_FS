@@ -24,6 +24,7 @@
     .icon-jellyfin { background: #7b2ccc; }
     .icon-emby     { background: #52b54b; }
     .icon-plex     { background: #e5a00d; color: #000; }
+    .icon-plextv   { background: #c0882a; color: #000; }
     .server-info { flex: 1; min-width: 0; }
     .server-name { font-weight: 600; font-size: .95rem; }
     .server-url  { font-size: .8rem; color: #64748b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -125,12 +126,12 @@
         <div class="server-row" data-alias="{{.Alias}}">
           <div class="server-icon icon-{{.Type}}">{{slice (printf "%s" .Type) 0 1 | upper}}</div>
           <div class="server-info">
-            <div class="server-name">{{.Username}}@{{.Alias}}</div>
-            <div class="server-url">{{.URL}}</div>
+            <div class="server-name">{{if .Username}}{{.Username}}@{{end}}{{.Alias}}</div>
+            <div class="server-url">{{if .URL}}{{.URL}}{{else}}via plex.tv{{end}}</div>
           </div>
           <span class="status-dot" id="dot-{{.Alias}}"></span>
-          <button class="btn btn-ghost btn-sm" onclick="testServer('{{.Alias}}','{{.URL}}','{{.Type}}','{{.Username}}','{{.APIKey}}','{{.Password}}')">Tester</button>
-          <button class="btn btn-ghost btn-sm" onclick="editServer('{{.Alias}}','{{.URL}}','{{.Type}}','{{.Username}}','{{.APIKey}}','{{.Password}}')">Modifier</button>
+          <button class="btn btn-ghost btn-sm" onclick="testServer('{{.Alias}}','{{.URL}}','{{.Type}}','{{.Username}}','{{.APIKey}}','{{.Password}}','{{.MachineID}}')">Tester</button>
+          <button class="btn btn-ghost btn-sm" onclick="editServer('{{.Alias}}','{{.URL}}','{{.Type}}','{{.Username}}','{{.APIKey}}','{{.Password}}','{{.MachineID}}')">Modifier</button>
           <button class="btn btn-danger btn-sm" onclick="removeServer('{{.Alias}}')">Retirer</button>
         </div>
         {{else}}
@@ -146,33 +147,49 @@
         <div class="form-grid">
           <div>
             <label>Type de serveur</label>
-            <select id="f-type">
+            <select id="f-type" onchange="onTypeChange()">
               <option value="jellyfin">Jellyfin</option>
               <option value="emby">Emby</option>
-              <option value="plex">Plex</option>
+              <option value="plex">Plex (direct)</option>
+              <option value="plextv">Plex (via plex.tv)</option>
             </select>
           </div>
           <div>
             <label>Alias (nom affiché)</label>
             <input id="f-alias" type="text" placeholder="HomeServer">
           </div>
-          <div style="grid-column:1/-1">
+          <div id="f-url-wrap" style="grid-column:1/-1">
             <label>URL du serveur</label>
             <input id="f-url" type="url" placeholder="http://192.168.1.10:8096">
           </div>
+          <div id="f-machine-id-wrap" style="grid-column:1/-1;display:none">
+            <label>Serveur Plex</label>
+            <div style="display:flex;gap:.5rem;align-items:center;margin-bottom:.35rem">
+              <select id="f-machine-id-select" style="flex:1" onchange="onServerSelect()">
+                <option value="">— Entrez vos identifiants puis cliquez sur Charger —</option>
+              </select>
+              <button class="btn btn-ghost btn-sm" type="button" id="f-load-servers-btn" onclick="loadPlexServers()">Charger les serveurs</button>
+            </div>
+            <input type="hidden" id="f-machine-id">
+            <input type="hidden" id="f-plextv-token">
+          </div>
+          <div id="f-totp-wrap" style="display:none">
+            <label>Code 2FA (TOTP — 6 chiffres)</label>
+            <input id="f-totp" type="text" inputmode="numeric" maxlength="6" placeholder="123456" autocomplete="one-time-code">
+          </div>
           <div>
-            <label>Nom d'utilisateur</label>
+            <label id="f-user-label">Nom d'utilisateur</label>
             <input id="f-user" type="text" placeholder="cyril">
           </div>
           <div>
             <label>Méthode d'authentification</label>
             <select id="f-auth-method" onchange="toggleAuthMethod()">
-              <option value="api_key">Clé API</option>
+              <option value="api_key">Clé API / Token</option>
               <option value="password">Mot de passe</option>
             </select>
           </div>
           <div id="f-key-wrap">
-            <label>Clé API</label>
+            <label id="f-key-label">Clé API</label>
             <input id="f-key" type="password" placeholder="xxxxxxxxxxxxxxxx">
           </div>
           <div id="f-pass-wrap" style="display:none">
@@ -478,6 +495,93 @@ async function purgeCache(minAgeFrac) {
 }
 
 // ─── SERVER FORM ──────────────────────────────────────────────────
+function onTypeChange() {
+  const type = document.getElementById('f-type').value;
+  const isPlexTV = type === 'plextv';
+  document.getElementById('f-url-wrap').style.display        = isPlexTV ? 'none' : '';
+  document.getElementById('f-machine-id-wrap').style.display = isPlexTV ? '' : 'none';
+  document.getElementById('f-user-label').textContent        = isPlexTV ? 'Email plex.tv' : 'Nom d\'utilisateur';
+  document.getElementById('f-key-label').textContent         = isPlexTV ? 'Token plex.tv' : 'Clé API';
+  // Reset plextv-specific fields when switching type
+  if (!isPlexTV) {
+    document.getElementById('f-machine-id-select').innerHTML =
+      '<option value="">— Entrez vos identifiants puis cliquez sur Charger —</option>';
+    document.getElementById('f-machine-id').value = '';
+    document.getElementById('f-plextv-token').value = '';
+    document.getElementById('f-totp-wrap').style.display = 'none';
+    document.getElementById('f-totp').value = '';
+  }
+}
+
+function onServerSelect() {
+  document.getElementById('f-machine-id').value =
+    document.getElementById('f-machine-id-select').value;
+}
+
+async function loadPlexServers() {
+  const btn = document.getElementById('f-load-servers-btn');
+  btn.disabled = true;
+  btn.textContent = '⏳…';
+  const isPass = document.getElementById('f-auth-method').value === 'password';
+  // Use stored token if already obtained (avoids re-auth + 2FA on subsequent loads)
+  const storedToken = document.getElementById('f-plextv-token').value;
+  try {
+    const r = await fetch('/api/plex/servers', {
+      method: 'POST',
+      body: JSON.stringify({
+        api_key:   storedToken || (isPass ? '' : document.getElementById('f-key').value),
+        username:  document.getElementById('f-user').value,
+        password:  isPass && !storedToken ? document.getElementById('f-pass').value : '',
+        totp_code: document.getElementById('f-totp').value.trim(),
+      })
+    });
+    const data = await r.json();
+    if (!r.ok) {
+      showNotice('add-notice', '✗ ' + (data.error || 'Erreur'), true);
+      return;
+    }
+    // 2FA required: show TOTP field and stop
+    if (data.two_factor_required) {
+      document.getElementById('f-totp-wrap').style.display = '';
+      document.getElementById('f-totp').focus();
+      showNotice('add-notice', '🔐 Code 2FA requis — entrez votre code TOTP et cliquez à nouveau sur Charger', false);
+      return;
+    }
+    // Success: store the resolved token as api_key so Connect() never re-auths
+    if (data.token) {
+      document.getElementById('f-plextv-token').value = data.token;
+    }
+    // Hide 2FA field once authenticated
+    document.getElementById('f-totp-wrap').style.display = 'none';
+    document.getElementById('f-totp').value = '';
+
+    const servers = data.servers || [];
+    const sel = document.getElementById('f-machine-id-select');
+    sel.innerHTML = '';
+    if (servers.length === 0) {
+      sel.innerHTML = '<option value="">Aucun serveur trouvé</option>';
+      showNotice('add-notice', 'Aucun serveur Plex trouvé sur ce compte', true);
+      return;
+    }
+    for (const srv of servers) {
+      const opt = document.createElement('option');
+      opt.value = srv.machine_id;
+      opt.textContent = srv.name + (srv.url ? '  —  ' + srv.url : '');
+      sel.appendChild(opt);
+    }
+    // If editing: restore previously selected machine_id
+    const current = document.getElementById('f-machine-id').value;
+    if (current) sel.value = current;
+    onServerSelect();
+    showNotice('add-notice', '✓ ' + servers.length + ' serveur(s) trouvé(s)', false);
+  } catch(e) {
+    showNotice('add-notice', '✗ ' + e.message, true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Charger les serveurs';
+  }
+}
+
 function toggleAuthMethod() {
   const isPass = document.getElementById('f-auth-method').value === 'password';
   document.getElementById('f-key-wrap').style.display  = isPass ? 'none' : '';
@@ -488,7 +592,15 @@ function toggleAddForm() {
   document.getElementById('f-editing-alias').value = '';
   document.getElementById('submit-btn').textContent = 'Ajouter';
   document.getElementById('f-alias').disabled = false;
+  document.getElementById('f-type').value = 'jellyfin';
   document.getElementById('f-auth-method').value = 'api_key';
+  document.getElementById('f-machine-id').value = '';
+  document.getElementById('f-plextv-token').value = '';
+  document.getElementById('f-totp').value = '';
+  document.getElementById('f-totp-wrap').style.display = 'none';
+  document.getElementById('f-machine-id-select').innerHTML =
+    '<option value="">— Entrez vos identifiants puis cliquez sur Charger —</option>';
+  onTypeChange();
   toggleAuthMethod();
   document.getElementById('add-form').classList.toggle('open');
 }
@@ -498,7 +610,7 @@ function cancelForm() {
   document.getElementById('add-form').classList.remove('open');
 }
 
-function editServer(alias, url, type, username, apiKey, password) {
+function editServer(alias, url, type, username, apiKey, password, machineId) {
   document.getElementById('f-editing-alias').value = alias;
   document.getElementById('f-alias').value = alias;
   document.getElementById('f-alias').disabled = true;
@@ -508,6 +620,16 @@ function editServer(alias, url, type, username, apiKey, password) {
   document.getElementById('f-auth-method').value = password ? 'password' : 'api_key';
   document.getElementById('f-key').value = apiKey || '';
   document.getElementById('f-pass').value = password || '';
+  document.getElementById('f-machine-id').value = machineId || '';
+  // For plextv: api_key holds the stored token — restore it
+  if (type === 'plextv' && (apiKey || '').length > 10) {
+    document.getElementById('f-plextv-token').value = apiKey;
+  } else {
+    document.getElementById('f-plextv-token').value = '';
+  }
+  document.getElementById('f-totp').value = '';
+  document.getElementById('f-totp-wrap').style.display = 'none';
+  onTypeChange();
   toggleAuthMethod();
   document.getElementById('submit-btn').textContent = 'Mettre à jour';
   document.getElementById('add-form').classList.add('open');
@@ -515,15 +637,26 @@ function editServer(alias, url, type, username, apiKey, password) {
 }
 
 function buildServerBody() {
-  const isPass = document.getElementById('f-auth-method').value === 'password';
+  const isPass      = document.getElementById('f-auth-method').value === 'password';
+  const type        = document.getElementById('f-type').value;
+  const plextvToken = document.getElementById('f-plextv-token').value;
+  // For plextv: always persist the resolved token as api_key so Connect() never
+  // needs to re-authenticate (avoids 2FA prompts at mount time).
+  const apiKey = type === 'plextv'
+    ? (plextvToken || (isPass ? '' : document.getElementById('f-key').value))
+    : (isPass ? '' : document.getElementById('f-key').value);
+  const password = type === 'plextv' && plextvToken
+    ? ''   // token obtained — no need to store the password
+    : (isPass ? document.getElementById('f-pass').value : '');
   return {
-    alias:    document.getElementById('f-alias').value,
-    type:     document.getElementById('f-type').value,
-    url:      document.getElementById('f-url').value,
-    username: document.getElementById('f-user').value,
-    api_key:  isPass ? '' : document.getElementById('f-key').value,
-    password: isPass ? document.getElementById('f-pass').value : '',
-    enabled:  true,
+    alias:      document.getElementById('f-alias').value,
+    type:       type,
+    url:        type === 'plextv' ? '' : document.getElementById('f-url').value,
+    username:   document.getElementById('f-user').value,
+    api_key:    apiKey,
+    password:   password,
+    machine_id: document.getElementById('f-machine-id').value,
+    enabled:    true,
   };
 }
 
@@ -549,11 +682,11 @@ async function removeServer(alias) {
   if (r.ok) { location.reload(); }
 }
 
-async function testServer(alias, url, type, username, apiKey, password) {
+async function testServer(alias, url, type, username, apiKey, password, machineId) {
   const dot = document.getElementById('dot-' + alias);
   dot.className = 'status-dot';
   try {
-    const r = await fetch('/api/servers/test', {method: 'POST', body: JSON.stringify({alias, url, type, username, api_key: apiKey, password})});
+    const r = await fetch('/api/servers/test', {method: 'POST', body: JSON.stringify({alias, url, type, username, api_key: apiKey, password, machine_id: machineId || ''})});
     const data = await r.json();
     const cls = {ok: 'ok', auth_error: 'warn', unreachable: 'err'}[data.status] || 'err';
     dot.className = 'status-dot ' + cls;

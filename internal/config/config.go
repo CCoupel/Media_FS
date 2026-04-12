@@ -14,16 +14,18 @@ const (
 	ConnectorJellyfin ConnectorType = "jellyfin"
 	ConnectorEmby     ConnectorType = "emby"
 	ConnectorPlex     ConnectorType = "plex"
+	ConnectorPlexTV   ConnectorType = "plextv"
 )
 
 type ServerConfig struct {
-	Alias    string        `yaml:"alias"     json:"alias"`
-	Type     ConnectorType `yaml:"type"      json:"type"`
-	URL      string        `yaml:"url"       json:"url"`
-	Username string        `yaml:"username"  json:"username"`
-	APIKey   string        `yaml:"api_key,omitempty" json:"api_key,omitempty"`
-	Password string        `yaml:"password,omitempty" json:"password,omitempty"`
-	Enabled  bool          `yaml:"enabled"   json:"enabled"`
+	Alias     string        `yaml:"alias"                json:"alias"`
+	Type      ConnectorType `yaml:"type"                 json:"type"`
+	URL       string        `yaml:"url"                  json:"url"`
+	Username  string        `yaml:"username"             json:"username"`
+	APIKey    string        `yaml:"api_key,omitempty"    json:"api_key,omitempty"`
+	Password  string        `yaml:"password,omitempty"   json:"password,omitempty"`
+	MachineID string        `yaml:"machine_id,omitempty" json:"machine_id,omitempty"` // Plex server machine identifier (plextv only)
+	Enabled   bool          `yaml:"enabled"              json:"enabled"`
 }
 
 type DownloadConfig struct {
