@@ -121,7 +121,15 @@ func (fs *MediaFS) Getattr(path string, stat *fuse.Stat_t, fh uint64) int {
 		if cached, ok := fs.nfoCache.Load(path); ok {
 			stat.Size = int64(len(cached.([]byte)))
 		} else {
-			stat.Size = 4096 // estimate until first Open caches the real content
+			// Generate eagerly so stat returns the exact size on first call.
+			// Open() will serve from cache and skip regeneration.
+			content, genErr := fs.generateNFO(parts[0], item)
+			if genErr == nil {
+				fs.nfoCache.Store(path, content)
+				stat.Size = int64(len(content))
+			} else {
+				stat.Size = 4096 // fallback if server unreachable
+			}
 		}
 		return 0
 	}
