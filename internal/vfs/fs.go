@@ -234,11 +234,11 @@ func (fs *MediaFS) Readdir(path string,
 			st.Mode = fuse.S_IFREG | 0444
 			st.Size = it.FileSize
 		}
-		fill(it.Name, st, 0)
+		fill(it.VFSName(), st, 0)
 
 		// Inject virtual sidecar files (.nfo + artwork).
 		// Use cached sizes when warm so directory listings reflect real sizes.
-		base := strings.TrimSuffix(it.Name, extensionOf(it.Name))
+		base := it.Name // sidecar base = title without extension
 		if !it.IsFolder {
 			nfoSize := int64(1024)
 			if cached, ok := fs.nfoCache.Load(path + "/" + base + ".nfo"); ok {
@@ -527,7 +527,7 @@ func (fs *MediaFS) resolveItem(parts []string) (*connector.MediaItem, error) {
 		}
 		var next *connector.MediaItem
 		for j := range items {
-			if items[j].Name == parts[i] {
+			if items[j].VFSName() == parts[i] {
 				next = &items[j]
 				break
 			}

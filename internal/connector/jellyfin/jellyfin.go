@@ -133,7 +133,8 @@ func (c *Client) GetItems(libraryID, parentID string) ([]connector.MediaItem, er
 			IsFolder     bool   `json:"IsFolder"`
 			DateCreated  string `json:"DateCreated"`
 			MediaSources []struct {
-				Size int64 `json:"Size"`
+				Size      int64  `json:"Size"`
+				Container string `json:"Container"`
 			} `json:"MediaSources"`
 		} `json:"Items"`
 	}
@@ -144,8 +145,12 @@ func (c *Client) GetItems(libraryID, parentID string) ([]connector.MediaItem, er
 	items := make([]connector.MediaItem, len(result.Items))
 	for i, it := range result.Items {
 		var size int64
+		var ext string
 		if len(it.MediaSources) > 0 {
 			size = it.MediaSources[0].Size
+			if c := strings.ToLower(it.MediaSources[0].Container); c != "" {
+				ext = "." + c
+			}
 		}
 		items[i] = connector.MediaItem{
 			ID:        it.ID,
@@ -155,6 +160,7 @@ func (c *Client) GetItems(libraryID, parentID string) ([]connector.MediaItem, er
 			IsFolder:  it.IsFolder,
 			FileSize:  size,
 			DateAdded: it.DateCreated,
+			Extension: ext,
 		}
 	}
 	return items, nil
@@ -187,7 +193,8 @@ func (c *Client) GetItemMetadata(itemID string) (connector.ItemMetadata, error) 
 			Type string `json:"Type"`
 		} `json:"People"`
 		MediaSources []struct {
-			Size int64 `json:"Size"`
+			Size      int64  `json:"Size"`
+			Container string `json:"Container"`
 		} `json:"MediaSources"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
