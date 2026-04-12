@@ -17,6 +17,8 @@ import (
 	"github.com/CCoupel/Media_FS/internal/connector"
 	_ "github.com/CCoupel/Media_FS/internal/connector/emby"
 	_ "github.com/CCoupel/Media_FS/internal/connector/jellyfin"
+	_ "github.com/CCoupel/Media_FS/internal/connector/plex"
+	_ "github.com/CCoupel/Media_FS/internal/connector/plextv"
 	"github.com/CCoupel/Media_FS/internal/downloader"
 	"github.com/CCoupel/Media_FS/internal/syscheck"
 	"github.com/CCoupel/Media_FS/internal/version"
@@ -232,25 +234,28 @@ func (s *Server) handleTestServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 1 — reachability: hit the public info endpoint (no auth required)
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get(srv.URL + "/System/Info/Public")
-	if err != nil {
-		writeTestLevel(w, "unreachable", err.Error())
-		return
-	}
-	resp.Body.Close()
-	if resp.StatusCode >= 500 {
-		writeTestLevel(w, "unreachable", fmt.Sprintf("server error %d", resp.StatusCode))
-		return
-	}
-
-	// Step 2 — authentication: Connect resolves the user ID (requires valid API key)
 	conn := connector.New(srv.Type)
 	if conn == nil {
 		writeTestLevel(w, "unreachable", fmt.Sprintf("type inconnu : %s", srv.Type))
 		return
 	}
+
+	// For Jellyfin/Emby: pre-check reachability without credentials first.
+	// For Plex/PlexTV: Connect() already calls Ping() internally, no pre-check needed.
+	if srv.Type == config.ConnectorJellyfin || srv.Type == config.ConnectorEmby {
+		client := &http.Client{Timeout: 5 * time.Second}
+		resp, err := client.Get(srv.URL + "/System/Info/Public")
+		if err != nil {
+			writeTestLevel(w, "unreachable", err.Error())
+			return
+		}
+		resp.Body.Close()
+		if resp.StatusCode >= 500 {
+			writeTestLevel(w, "unreachable", fmt.Sprintf("server error %d", resp.StatusCode))
+			return
+		}
+	}
+
 	if err := conn.Connect(srv); err != nil {
 		writeTestLevel(w, "auth_error", err.Error())
 		return

@@ -24,6 +24,7 @@
     .icon-jellyfin { background: #7b2ccc; }
     .icon-emby     { background: #52b54b; }
     .icon-plex     { background: #e5a00d; color: #000; }
+    .icon-plextv   { background: #c0882a; color: #000; }
     .server-info { flex: 1; min-width: 0; }
     .server-name { font-weight: 600; font-size: .95rem; }
     .server-url  { font-size: .8rem; color: #64748b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -125,12 +126,12 @@
         <div class="server-row" data-alias="{{.Alias}}">
           <div class="server-icon icon-{{.Type}}">{{slice (printf "%s" .Type) 0 1 | upper}}</div>
           <div class="server-info">
-            <div class="server-name">{{.Username}}@{{.Alias}}</div>
-            <div class="server-url">{{.URL}}</div>
+            <div class="server-name">{{if .Username}}{{.Username}}@{{end}}{{.Alias}}</div>
+            <div class="server-url">{{if .URL}}{{.URL}}{{else}}via plex.tv{{end}}</div>
           </div>
           <span class="status-dot" id="dot-{{.Alias}}"></span>
-          <button class="btn btn-ghost btn-sm" onclick="testServer('{{.Alias}}','{{.URL}}','{{.Type}}','{{.Username}}','{{.APIKey}}','{{.Password}}')">Tester</button>
-          <button class="btn btn-ghost btn-sm" onclick="editServer('{{.Alias}}','{{.URL}}','{{.Type}}','{{.Username}}','{{.APIKey}}','{{.Password}}')">Modifier</button>
+          <button class="btn btn-ghost btn-sm" onclick="testServer('{{.Alias}}','{{.URL}}','{{.Type}}','{{.Username}}','{{.APIKey}}','{{.Password}}','{{.MachineID}}')">Tester</button>
+          <button class="btn btn-ghost btn-sm" onclick="editServer('{{.Alias}}','{{.URL}}','{{.Type}}','{{.Username}}','{{.APIKey}}','{{.Password}}','{{.MachineID}}')">Modifier</button>
           <button class="btn btn-danger btn-sm" onclick="removeServer('{{.Alias}}')">Retirer</button>
         </div>
         {{else}}
@@ -146,33 +147,38 @@
         <div class="form-grid">
           <div>
             <label>Type de serveur</label>
-            <select id="f-type">
+            <select id="f-type" onchange="onTypeChange()">
               <option value="jellyfin">Jellyfin</option>
               <option value="emby">Emby</option>
-              <option value="plex">Plex</option>
+              <option value="plex">Plex (direct)</option>
+              <option value="plextv">Plex (via plex.tv)</option>
             </select>
           </div>
           <div>
             <label>Alias (nom affiché)</label>
             <input id="f-alias" type="text" placeholder="HomeServer">
           </div>
-          <div style="grid-column:1/-1">
+          <div id="f-url-wrap" style="grid-column:1/-1">
             <label>URL du serveur</label>
             <input id="f-url" type="url" placeholder="http://192.168.1.10:8096">
           </div>
+          <div id="f-machine-id-wrap" style="grid-column:1/-1;display:none">
+            <label>Machine ID du serveur Plex</label>
+            <input id="f-machine-id" type="text" placeholder="abc123def456… (visible dans les logs au premier test)">
+          </div>
           <div>
-            <label>Nom d'utilisateur</label>
+            <label id="f-user-label">Nom d'utilisateur</label>
             <input id="f-user" type="text" placeholder="cyril">
           </div>
           <div>
             <label>Méthode d'authentification</label>
             <select id="f-auth-method" onchange="toggleAuthMethod()">
-              <option value="api_key">Clé API</option>
+              <option value="api_key">Clé API / Token</option>
               <option value="password">Mot de passe</option>
             </select>
           </div>
           <div id="f-key-wrap">
-            <label>Clé API</label>
+            <label id="f-key-label">Clé API</label>
             <input id="f-key" type="password" placeholder="xxxxxxxxxxxxxxxx">
           </div>
           <div id="f-pass-wrap" style="display:none">
@@ -478,6 +484,15 @@ async function purgeCache(minAgeFrac) {
 }
 
 // ─── SERVER FORM ──────────────────────────────────────────────────
+function onTypeChange() {
+  const type = document.getElementById('f-type').value;
+  const isPlexTV = type === 'plextv';
+  document.getElementById('f-url-wrap').style.display        = isPlexTV ? 'none' : '';
+  document.getElementById('f-machine-id-wrap').style.display = isPlexTV ? '' : 'none';
+  document.getElementById('f-user-label').textContent        = isPlexTV ? 'Email plex.tv' : 'Nom d\'utilisateur';
+  document.getElementById('f-key-label').textContent         = isPlexTV ? 'Token plex.tv' : 'Clé API';
+}
+
 function toggleAuthMethod() {
   const isPass = document.getElementById('f-auth-method').value === 'password';
   document.getElementById('f-key-wrap').style.display  = isPass ? 'none' : '';
@@ -488,7 +503,10 @@ function toggleAddForm() {
   document.getElementById('f-editing-alias').value = '';
   document.getElementById('submit-btn').textContent = 'Ajouter';
   document.getElementById('f-alias').disabled = false;
+  document.getElementById('f-type').value = 'jellyfin';
   document.getElementById('f-auth-method').value = 'api_key';
+  document.getElementById('f-machine-id').value = '';
+  onTypeChange();
   toggleAuthMethod();
   document.getElementById('add-form').classList.toggle('open');
 }
@@ -498,7 +516,7 @@ function cancelForm() {
   document.getElementById('add-form').classList.remove('open');
 }
 
-function editServer(alias, url, type, username, apiKey, password) {
+function editServer(alias, url, type, username, apiKey, password, machineId) {
   document.getElementById('f-editing-alias').value = alias;
   document.getElementById('f-alias').value = alias;
   document.getElementById('f-alias').disabled = true;
@@ -508,6 +526,8 @@ function editServer(alias, url, type, username, apiKey, password) {
   document.getElementById('f-auth-method').value = password ? 'password' : 'api_key';
   document.getElementById('f-key').value = apiKey || '';
   document.getElementById('f-pass').value = password || '';
+  document.getElementById('f-machine-id').value = machineId || '';
+  onTypeChange();
   toggleAuthMethod();
   document.getElementById('submit-btn').textContent = 'Mettre à jour';
   document.getElementById('add-form').classList.add('open');
@@ -516,14 +536,16 @@ function editServer(alias, url, type, username, apiKey, password) {
 
 function buildServerBody() {
   const isPass = document.getElementById('f-auth-method').value === 'password';
+  const type   = document.getElementById('f-type').value;
   return {
-    alias:    document.getElementById('f-alias').value,
-    type:     document.getElementById('f-type').value,
-    url:      document.getElementById('f-url').value,
-    username: document.getElementById('f-user').value,
-    api_key:  isPass ? '' : document.getElementById('f-key').value,
-    password: isPass ? document.getElementById('f-pass').value : '',
-    enabled:  true,
+    alias:      document.getElementById('f-alias').value,
+    type:       type,
+    url:        type === 'plextv' ? '' : document.getElementById('f-url').value,
+    username:   document.getElementById('f-user').value,
+    api_key:    isPass ? '' : document.getElementById('f-key').value,
+    password:   isPass ? document.getElementById('f-pass').value : '',
+    machine_id: document.getElementById('f-machine-id').value,
+    enabled:    true,
   };
 }
 
@@ -549,11 +571,11 @@ async function removeServer(alias) {
   if (r.ok) { location.reload(); }
 }
 
-async function testServer(alias, url, type, username, apiKey, password) {
+async function testServer(alias, url, type, username, apiKey, password, machineId) {
   const dot = document.getElementById('dot-' + alias);
   dot.className = 'status-dot';
   try {
-    const r = await fetch('/api/servers/test', {method: 'POST', body: JSON.stringify({alias, url, type, username, api_key: apiKey, password})});
+    const r = await fetch('/api/servers/test', {method: 'POST', body: JSON.stringify({alias, url, type, username, api_key: apiKey, password, machine_id: machineId || ''})});
     const data = await r.json();
     const cls = {ok: 'ok', auth_error: 'warn', unreachable: 'err'}[data.status] || 'err';
     dot.className = 'status-dot ' + cls;
