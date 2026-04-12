@@ -163,8 +163,14 @@
             <input id="f-url" type="url" placeholder="http://192.168.1.10:8096">
           </div>
           <div id="f-machine-id-wrap" style="grid-column:1/-1;display:none">
-            <label>Machine ID du serveur Plex</label>
-            <input id="f-machine-id" type="text" placeholder="abc123def456… (visible dans les logs au premier test)">
+            <label>Serveur Plex</label>
+            <div style="display:flex;gap:.5rem;align-items:center;margin-bottom:.35rem">
+              <select id="f-machine-id-select" style="flex:1" onchange="onServerSelect()">
+                <option value="">— Entrez vos identifiants puis cliquez sur Charger —</option>
+              </select>
+              <button class="btn btn-ghost btn-sm" type="button" id="f-load-servers-btn" onclick="loadPlexServers()">Charger les serveurs</button>
+            </div>
+            <input type="hidden" id="f-machine-id">
           </div>
           <div>
             <label id="f-user-label">Nom d'utilisateur</label>
@@ -491,6 +497,62 @@ function onTypeChange() {
   document.getElementById('f-machine-id-wrap').style.display = isPlexTV ? '' : 'none';
   document.getElementById('f-user-label').textContent        = isPlexTV ? 'Email plex.tv' : 'Nom d\'utilisateur';
   document.getElementById('f-key-label').textContent         = isPlexTV ? 'Token plex.tv' : 'Clé API';
+  // Reset server list when switching away from plextv
+  if (!isPlexTV) {
+    document.getElementById('f-machine-id-select').innerHTML =
+      '<option value="">— Entrez vos identifiants puis cliquez sur Charger —</option>';
+    document.getElementById('f-machine-id').value = '';
+  }
+}
+
+function onServerSelect() {
+  document.getElementById('f-machine-id').value =
+    document.getElementById('f-machine-id-select').value;
+}
+
+async function loadPlexServers() {
+  const btn = document.getElementById('f-load-servers-btn');
+  btn.disabled = true;
+  btn.textContent = '⏳…';
+  const isPass = document.getElementById('f-auth-method').value === 'password';
+  try {
+    const r = await fetch('/api/plex/servers', {
+      method: 'POST',
+      body: JSON.stringify({
+        api_key:  isPass ? '' : document.getElementById('f-key').value,
+        username: document.getElementById('f-user').value,
+        password: isPass ? document.getElementById('f-pass').value : '',
+      })
+    });
+    const data = await r.json();
+    if (!r.ok) {
+      showNotice('add-notice', '✗ ' + (data.error || 'Erreur'), true);
+      return;
+    }
+    const sel = document.getElementById('f-machine-id-select');
+    sel.innerHTML = '';
+    if (!data || data.length === 0) {
+      sel.innerHTML = '<option value="">Aucun serveur trouvé</option>';
+      showNotice('add-notice', 'Aucun serveur Plex trouvé sur ce compte', true);
+      return;
+    }
+    for (const srv of data) {
+      const opt = document.createElement('option');
+      opt.value = srv.machine_id;
+      opt.textContent = srv.name + (srv.url ? '  —  ' + srv.url : '');
+      sel.appendChild(opt);
+    }
+    // If editing: restore previously selected machine_id
+    const current = document.getElementById('f-machine-id').value;
+    if (current) sel.value = current;
+    onServerSelect();
+    showNotice('add-notice', '✓ ' + data.length + ' serveur(s) trouvé(s)', false);
+  } catch(e) {
+    showNotice('add-notice', '✗ ' + e.message, true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Charger les serveurs';
+  }
 }
 
 function toggleAuthMethod() {
@@ -506,6 +568,8 @@ function toggleAddForm() {
   document.getElementById('f-type').value = 'jellyfin';
   document.getElementById('f-auth-method').value = 'api_key';
   document.getElementById('f-machine-id').value = '';
+  document.getElementById('f-machine-id-select').innerHTML =
+    '<option value="">— Entrez vos identifiants puis cliquez sur Charger —</option>';
   onTypeChange();
   toggleAuthMethod();
   document.getElementById('add-form').classList.toggle('open');

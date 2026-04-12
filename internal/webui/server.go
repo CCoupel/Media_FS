@@ -18,7 +18,7 @@ import (
 	_ "github.com/CCoupel/Media_FS/internal/connector/emby"
 	_ "github.com/CCoupel/Media_FS/internal/connector/jellyfin"
 	_ "github.com/CCoupel/Media_FS/internal/connector/plex"
-	_ "github.com/CCoupel/Media_FS/internal/connector/plextv"
+	"github.com/CCoupel/Media_FS/internal/connector/plextv"
 	"github.com/CCoupel/Media_FS/internal/downloader"
 	"github.com/CCoupel/Media_FS/internal/syscheck"
 	"github.com/CCoupel/Media_FS/internal/version"
@@ -125,6 +125,7 @@ func (s *Server) Start() {
 	mux.HandleFunc("/api/monitor/purge-window", s.handlePurgeWindow)
 	mux.HandleFunc("/api/config-session", s.handleConfigSession)
 	mux.HandleFunc("/api/system/status", s.handleSystemStatus)
+	mux.HandleFunc("/api/plex/servers", s.handlePlexServers)
 
 	go http.Serve(s.listener, mux) //nolint:errcheck
 }
@@ -392,6 +393,29 @@ func (s *Server) handleSystemStatus(w http.ResponseWriter, _ *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"winfsp": syscheck.CheckWinFSP(),
 	})
+}
+
+func (s *Server) handlePlexServers(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST required", 405)
+		return
+	}
+	var body struct {
+		APIKey   string `json:"api_key"`
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	servers, err := plextv.ListServers(body.APIKey, body.Username, body.Password)
+	if err != nil {
+		jsonError(w, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(servers)
 }
 
 func jsonError(w http.ResponseWriter, msg string) {

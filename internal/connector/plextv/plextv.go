@@ -25,6 +25,43 @@ func init() {
 	})
 }
 
+// ServerInfo describes a Plex Media Server available on plex.tv.
+type ServerInfo struct {
+	Name      string `json:"name"`
+	MachineID string `json:"machine_id"`
+	URL       string `json:"url"` // best resolved connection URL
+}
+
+// ListServers authenticates on plex.tv and returns all available Plex servers.
+// apiKey (plex.tv account token) takes precedence over username/password.
+func ListServers(apiKey, username, password string) ([]ServerInfo, error) {
+	token := apiKey
+	if token == "" {
+		var err error
+		token, err = signIn(username, password)
+		if err != nil {
+			return nil, err
+		}
+	}
+	resources, err := fetchResources(token)
+	if err != nil {
+		return nil, err
+	}
+	servers := make([]ServerInfo, 0, len(resources))
+	for _, r := range resources {
+		bestURL := ""
+		if best := pickBestConnection(r.Connections); best != nil {
+			bestURL = best.URI
+		}
+		servers = append(servers, ServerInfo{
+			Name:      r.Name,
+			MachineID: r.ClientIdentifier,
+			URL:       bestURL,
+		})
+	}
+	return servers, nil
+}
+
 // Client resolves a Plex server via plex.tv then wraps a plex.Client.
 type Client struct {
 	inner connector.MediaConnector
