@@ -752,9 +752,14 @@ func (fs *MediaFS) generateNFO(serverKey string, item *connector.MediaItem) ([]b
 }
 
 func (fs *MediaFS) listItemsCached(serverKey, libID, parentID string) ([]connector.MediaItem, error) {
-	cacheKey := parentID
-	if cacheKey == "" {
+	// Cache key must be scoped to the library to avoid collisions between
+	// Plex section IDs (small integers like "1","2","3") and item ratingKeys
+	// that happen to have the same value.
+	var cacheKey string
+	if parentID == "" {
 		cacheKey = libID
+	} else {
+		cacheKey = libID + "|" + parentID
 	}
 
 	var items []connector.MediaItem
