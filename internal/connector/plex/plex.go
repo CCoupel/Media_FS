@@ -21,7 +21,7 @@ func init() {
 	})
 }
 
-const plexPageSize = 100
+const plexPageSize = 500
 
 // Client implements connector.MediaConnector for Plex Media Server.
 type Client struct {
