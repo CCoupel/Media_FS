@@ -142,11 +142,16 @@ func (s *Server) Stop() {
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
+	maxCacheChunks := 0
+	if s.cfg.Download.ChunkSizeMB > 0 {
+		maxCacheChunks = s.cfg.Download.MaxCacheMB / s.cfg.Download.ChunkSizeMB
+	}
 	data := map[string]interface{}{
-		"Servers":     s.cfg.Servers,
-		"MountConfig": s.cfg.Mount,
-		"Download":    s.cfg.Download,
-		"Version":     version.Version,
+		"Servers":        s.cfg.Servers,
+		"MountConfig":    s.cfg.Mount,
+		"Download":       s.cfg.Download,
+		"Version":        version.Version,
+		"MaxCacheChunks": maxCacheChunks,
 	}
 	if err := s.tmpl.ExecuteTemplate(w, "config.html", data); err != nil {
 		http.Error(w, err.Error(), 500)
@@ -277,7 +282,7 @@ func (s *Server) handleSave(w http.ResponseWriter, r *http.Request) {
 		MountPoint     string `json:"mount_point"`
 		ParallelChunks int    `json:"parallel_chunks"`
 		ChunkSizeMB    int    `json:"chunk_size_mb"`
-		MaxCacheMB     int    `json:"max_cache_mb"`
+		MaxCacheChunks int    `json:"max_cache_chunks"` // UI sends chunks; we derive MaxCacheMB
 		CacheTTLMin    int    `json:"cache_ttl_min"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&settings); err == nil {
@@ -293,8 +298,9 @@ func (s *Server) handleSave(w http.ResponseWriter, r *http.Request) {
 		if settings.ChunkSizeMB > 0 {
 			s.cfg.Download.ChunkSizeMB = settings.ChunkSizeMB
 		}
-		if settings.MaxCacheMB > 0 {
-			s.cfg.Download.MaxCacheMB = settings.MaxCacheMB
+		// Use new ChunkSizeMB (already updated above) to convert chunks → MB.
+		if settings.MaxCacheChunks > 0 {
+			s.cfg.Download.MaxCacheMB = settings.MaxCacheChunks * s.cfg.Download.ChunkSizeMB
 		}
 		if settings.CacheTTLMin > 0 {
 			s.cfg.Download.CacheTTLMin = settings.CacheTTLMin

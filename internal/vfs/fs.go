@@ -24,6 +24,14 @@ type MountedServer struct {
 	Libraries []connector.Library
 }
 
+// decodedEntry is a pre-decoded item slice kept in memory to avoid repeated
+// JSON unmarshal on every Getattr/Readdir call (would otherwise cost ~10ms ×
+// 4300 items = ~40s for large libraries).
+type decodedEntry struct {
+	items     []connector.MediaItem
+	expiresAt int64 // unix seconds
+}
+
 // MediaFS implements fuse.FileSystemInterface.
 // One instance serves all mounted servers under a single mount point.
 type MediaFS struct {
@@ -42,6 +50,12 @@ type MediaFS struct {
 	// nfoCache stores generated NFO content keyed by VFS path so that
 	// Getattr can return the real file size on subsequent calls.
 	nfoCache sync.Map // path(string) → []byte
+
+	// decodedItems is a second-level in-memory cache that stores already-decoded
+	// []MediaItem slices, keyed by (serverKey+"\x00"+cacheKey).
+	// This avoids JSON-unmarshalling the full library on every Getattr call.
+	decodedItems    sync.Map
+	decodedItemsTTL int64 // seconds, derived from cache.ItemsTTL()
 }
 
 type fileHandle struct {
@@ -57,10 +71,11 @@ type fileHandle struct {
 // New creates a MediaFS instance.
 func New(c *cache.Cache, dl *downloader.Downloader) *MediaFS {
 	return &MediaFS{
-		servers: make(map[string]*MountedServer),
-		cache:   c,
-		dl:      dl,
-		handles: make(map[uint64]*fileHandle),
+		servers:         make(map[string]*MountedServer),
+		cache:           c,
+		dl:              dl,
+		handles:         make(map[uint64]*fileHandle),
+		decodedItemsTTL: int64(c.ItemsTTL() / time.Second),
 	}
 }
 
@@ -780,9 +795,23 @@ func (fs *MediaFS) listItemsCached(serverKey, libID, parentID string) ([]connect
 		cacheKey = libID + "|" + parentID
 	}
 
+	decKey := serverKey + "\x00" + cacheKey
+	now := time.Now().Unix()
+
+	// Fast path: already-decoded slice — avoids JSON unmarshal on every Getattr
+	// call (which would otherwise cost ~10ms × N items = tens of seconds).
+	if v, ok := fs.decodedItems.Load(decKey); ok {
+		e := v.(decodedEntry)
+		if e.expiresAt > now {
+			return e.items, nil
+		}
+		fs.decodedItems.Delete(decKey)
+	}
+
 	var items []connector.MediaItem
 	if ok, err := fs.cache.GetItems(serverKey, cacheKey, &items); ok {
 		log.Printf("[vfs] cache hit: server=%s lib=%s parent=%s → %d items", serverKey, libID, parentID, len(items))
+		fs.decodedItems.Store(decKey, decodedEntry{items: items, expiresAt: now + fs.decodedItemsTTL})
 		return items, err
 	}
 
@@ -801,5 +830,6 @@ func (fs *MediaFS) listItemsCached(serverKey, libID, parentID string) ([]connect
 	log.Printf("[vfs] GetItems: server=%s lib=%s parent=%s → %d items", serverKey, libID, parentID, len(items))
 
 	_ = fs.cache.StoreItems(serverKey, cacheKey, items)
+	fs.decodedItems.Store(decKey, decodedEntry{items: items, expiresAt: now + fs.decodedItemsTTL})
 	return items, nil
 }
