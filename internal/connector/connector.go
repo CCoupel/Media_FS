@@ -41,6 +41,17 @@ type MediaItem struct {
 	IsFolder  bool
 	FileSize  int64  // 0 for folders
 	DateAdded string // ISO 8601 from server, used for mtime
+	Extension string // file extension with leading dot, e.g. ".mkv" (empty for folders)
+}
+
+// VFSName returns the name as it appears in the virtual filesystem.
+// For media files it appends the extension (e.g. "Inception (2010).mkv").
+// For folders the plain Name is returned.
+func (m MediaItem) VFSName() string {
+	if !m.IsFolder && m.Extension != "" {
+		return m.Name + m.Extension
+	}
+	return m.Name
 }
 
 // ItemMetadata holds the full metadata for a media item.
