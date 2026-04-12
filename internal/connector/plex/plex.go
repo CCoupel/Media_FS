@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"maps"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -25,9 +26,10 @@ const plexPageSize = 500
 
 // Client implements connector.MediaConnector for Plex Media Server.
 type Client struct {
-	baseURL string
-	token   string
-	http    *http.Client
+	baseURL       string
+	token         string
+	http          *http.Client
+	movieSections map[string]bool // libID → true for movie sections
 }
 
 func (c *Client) Connect(cfg config.ServerConfig) error {
@@ -86,10 +88,14 @@ func (c *Client) GetLibraries() ([]connector.Library, error) {
 		return nil, err
 	}
 
+	c.movieSections = make(map[string]bool)
 	libs := make([]connector.Library, 0, len(result.Directories))
 	for _, d := range result.Directories {
 		if d.Key == "" {
 			continue
+		}
+		if d.Type == "movie" {
+			c.movieSections[d.Key] = true
 		}
 		libs = append(libs, connector.Library{
 			ID:   d.Key,
@@ -102,10 +108,132 @@ func (c *Client) GetLibraries() ([]connector.Library, error) {
 }
 
 func (c *Client) GetItems(libraryID, parentID string) ([]connector.MediaItem, error) {
+	isMovieSection := c.movieSections != nil && c.movieSections[libraryID]
+
 	if parentID != "" {
+		// "grp:{k1},{k2},..." — expand group into numbered sub-folders.
+		if strings.HasPrefix(parentID, "grp:") {
+			return expandMovieGroup(parentID), nil
+		}
+		// Single movie folder or numbered sub-folder: return the media file.
+		if isMovieSection {
+			return c.fetchMovieFiles(parentID)
+		}
 		return c.fetchAllItems(fmt.Sprintf("/library/metadata/%s/children", parentID))
 	}
-	return c.fetchAllItems(fmt.Sprintf("/library/sections/%s/all", libraryID))
+
+	if !isMovieSection {
+		return c.fetchAllItems(fmt.Sprintf("/library/sections/%s/all", libraryID))
+	}
+
+	// Movie section root: fetch with GUIDs for IMDB/TMDB disambiguation.
+	rawItems, err := c.fetchAllXMLItems(
+		fmt.Sprintf("/library/sections/%s/all", libraryID),
+		url.Values{"includeGuids": {"1"}},
+	)
+	if err != nil {
+		return nil, err
+	}
+	return buildMovieFolders(rawItems), nil
+}
+
+// buildMovieFolders converts a flat list of movie xmlItems into virtual folder
+// MediaItems. Movies with the same folder name are grouped under a single
+// "grp:{k1},{k2},..." ID; the VFS can then expand them into numbered sub-folders.
+func buildMovieFolders(rawItems []xmlItem) []connector.MediaItem {
+	// Preserve insertion order while grouping by folder name.
+	type group struct {
+		first connector.MediaItem // for timestamps / type
+		keys  []string
+	}
+	var order []string
+	groups := make(map[string]*group)
+
+	for _, it := range rawItems {
+		name := movieFolderName(it)
+		if _, exists := groups[name]; !exists {
+			order = append(order, name)
+			mi := mapXMLItem(it)
+			groups[name] = &group{first: mi}
+		}
+		groups[name].keys = append(groups[name].keys, it.RatingKey)
+	}
+
+	result := make([]connector.MediaItem, 0, len(order))
+	for _, name := range order {
+		g := groups[name]
+		id := g.keys[0]
+		if len(g.keys) > 1 {
+			id = "grp:" + strings.Join(g.keys, ",")
+		}
+		result = append(result, connector.MediaItem{
+			ID:             id,
+			Name:           name,
+			Type:           connector.ItemTypeMovie,
+			IsFolder:       true,
+			DateAdded:      g.first.DateAdded,
+			ProductionYear: g.first.ProductionYear,
+		})
+	}
+	return result
+}
+
+// expandMovieGroup turns "grp:{k1},{k2},..." into numbered sub-folder items.
+// Each sub-folder has the ratingKey as its ID so fetchMovieFiles resolves it.
+func expandMovieGroup(parentID string) []connector.MediaItem {
+	keys := strings.Split(strings.TrimPrefix(parentID, "grp:"), ",")
+	result := make([]connector.MediaItem, 0, len(keys))
+	for i, k := range keys {
+		result = append(result, connector.MediaItem{
+			ID:       k,
+			Name:     strconv.Itoa(i + 1),
+			Type:     connector.ItemTypeMovie,
+			IsFolder: true,
+		})
+	}
+	return result
+}
+
+// fetchMovieFiles fetches a single movie's metadata and returns its media file.
+// The item ID is the ratingKey, so GetStreamURL/GetItemMetadata work unchanged.
+func (c *Client) fetchMovieFiles(movieID string) ([]connector.MediaItem, error) {
+	resp, err := c.get(fmt.Sprintf("/library/metadata/%s", movieID), nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var raw struct {
+		XMLName xml.Name  `xml:"MediaContainer"`
+		Videos  []xmlItem `xml:"Video"`
+	}
+	if err := xml.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		return nil, err
+	}
+	if len(raw.Videos) == 0 {
+		return nil, nil
+	}
+	item := mapXMLItem(raw.Videos[0])
+	// Ensure the file item carries the same display name as its parent folder
+	// so NFO/artwork path resolution (base-name matching) works correctly.
+	item.Name = movieFolderName(raw.Videos[0])
+	return []connector.MediaItem{item}, nil
+}
+
+// movieFolderName returns the VFS folder/file base name for a movie.
+// Prefers IMDB, then TMDB, then TVDB for disambiguation; falls back to title only.
+func movieFolderName(it xmlItem) string {
+	for _, g := range it.Guids {
+		switch {
+		case strings.HasPrefix(g.ID, "imdb://"):
+			return fmt.Sprintf("%s {imdb-%s}", it.Title, strings.TrimPrefix(g.ID, "imdb://"))
+		case strings.HasPrefix(g.ID, "tmdb://"):
+			return fmt.Sprintf("%s {tmdb-%s}", it.Title, strings.TrimPrefix(g.ID, "tmdb://"))
+		case strings.HasPrefix(g.ID, "tvdb://"):
+			return fmt.Sprintf("%s {tvdb-%s}", it.Title, strings.TrimPrefix(g.ID, "tvdb://"))
+		}
+	}
+	return it.Title
 }
 
 func (c *Client) GetItemMetadata(itemID string) (connector.ItemMetadata, error) {
@@ -288,11 +416,13 @@ type xmlItem struct {
 	ParentKey   string     `xml:"parentRatingKey,attr"`
 	Title       string     `xml:"title,attr"`
 	Type        string     `xml:"type,attr"`
+	Year        string     `xml:"year,attr"`
 	AddedAt     string     `xml:"addedAt,attr"`
 	Duration    string     `xml:"duration,attr"`
 	Index       string     `xml:"index,attr"`
 	ParentIndex string     `xml:"parentIndex,attr"`
 	Media       []xmlMedia `xml:"Media"`
+	Guids       []xmlGuid  `xml:"Guid"`
 }
 
 type xmlMetadata struct {
@@ -341,38 +471,47 @@ type itemsContainer struct {
 
 // --- internal helpers ---
 
-func (c *Client) fetchAllItems(path string) ([]connector.MediaItem, error) {
-	var all []connector.MediaItem
+// fetchAllXMLItems fetches all pages from path and returns raw xmlItem values.
+// extra params are merged into each page request (e.g. includeGuids=1).
+func (c *Client) fetchAllXMLItems(path string, extra url.Values) ([]xmlItem, error) {
+	var all []xmlItem
 	offset := 0
-
 	for {
 		params := url.Values{
 			"X-Plex-Container-Start": {strconv.Itoa(offset)},
 			"X-Plex-Container-Size":  {strconv.Itoa(plexPageSize)},
 		}
+		maps.Copy(params, extra)
 		resp, err := c.get(path, params)
 		if err != nil {
 			return nil, err
 		}
-
 		var container itemsContainer
 		decErr := xml.NewDecoder(resp.Body).Decode(&container)
 		resp.Body.Close()
 		if decErr != nil {
 			return nil, decErr
 		}
-
 		items := mergeItems(container)
-		for _, it := range items {
-			all = append(all, mapXMLItem(it))
-		}
+		all = append(all, items...)
 		offset += len(items)
-
 		if len(items) < plexPageSize || (container.TotalSize > 0 && offset >= container.TotalSize) {
 			break
 		}
 	}
 	return all, nil
+}
+
+func (c *Client) fetchAllItems(path string) ([]connector.MediaItem, error) {
+	raw, err := c.fetchAllXMLItems(path, nil)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]connector.MediaItem, 0, len(raw))
+	for _, it := range raw {
+		result = append(result, mapXMLItem(it))
+	}
+	return result, nil
 }
 
 func mergeItems(cont itemsContainer) []xmlItem {
@@ -402,15 +541,18 @@ func mapXMLItem(it xmlItem) connector.MediaItem {
 		}
 	}
 
+	year, _ := strconv.Atoi(it.Year)
+
 	return connector.MediaItem{
-		ID:        it.RatingKey,
-		ParentID:  it.ParentKey,
-		Name:      it.Title,
-		Type:      plexTypeToItemType(it.Type),
-		IsFolder:  isFolder,
-		FileSize:  size,
-		DateAdded: dateAdded,
-		Extension: ext,
+		ID:             it.RatingKey,
+		ParentID:       it.ParentKey,
+		Name:           it.Title,
+		Type:           plexTypeToItemType(it.Type),
+		IsFolder:       isFolder,
+		FileSize:       size,
+		DateAdded:      dateAdded,
+		Extension:      ext,
+		ProductionYear: year,
 	}
 }
 
