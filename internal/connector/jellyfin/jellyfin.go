@@ -114,7 +114,7 @@ func (c *Client) GetItems(libraryID, parentID string) ([]connector.MediaItem, er
 
 	params := url.Values{
 		"ParentId": {parent},
-		"Fields":   {"BasicSyncInfo,MediaSources"},
+		"Fields":   {"MediaSources,DateCreated"},
 		"SortBy":   {"SortName"},
 		"SortOrder": {"Ascending"},
 	}
@@ -123,6 +123,7 @@ func (c *Client) GetItems(libraryID, parentID string) ([]connector.MediaItem, er
 		return nil, err
 	}
 	defer resp.Body.Close()
+
 
 	var result struct {
 		Items []struct {
@@ -168,7 +169,7 @@ func (c *Client) GetItems(libraryID, parentID string) ([]connector.MediaItem, er
 
 func (c *Client) GetItemMetadata(itemID string) (connector.ItemMetadata, error) {
 	resp, err := c.get(fmt.Sprintf("/Users/%s/Items/%s", c.userID, itemID), url.Values{
-		"Fields": {"Genres,People,ExternalUrls,ProviderIds,DateCreated"},
+		"Fields": {"Genres,People,ExternalUrls,ProviderIds,DateCreated,PremiereDate"},
 	})
 	if err != nil {
 		return connector.ItemMetadata{}, err
@@ -180,6 +181,7 @@ func (c *Client) GetItemMetadata(itemID string) (connector.ItemMetadata, error) 
 		Name               string            `json:"Name"`
 		Type               string            `json:"Type"`
 		ProductionYear     int               `json:"ProductionYear"`
+		PremiereDate       string            `json:"PremiereDate"`
 		Overview           string            `json:"Overview"`
 		CommunityRating    float64           `json:"CommunityRating"`
 		Genres             []string          `json:"Genres"`
@@ -217,6 +219,7 @@ func (c *Client) GetItemMetadata(itemID string) (connector.ItemMetadata, error) 
 		Name:          raw.Name,
 		Type:          connector.ItemType(raw.Type),
 		Year:          raw.ProductionYear,
+		PremiereDate:  raw.PremiereDate,
 		Overview:      raw.Overview,
 		Rating:        raw.CommunityRating,
 		Genres:        raw.Genres,

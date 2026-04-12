@@ -118,6 +118,7 @@ func (fs *MediaFS) Getattr(path string, stat *fuse.Stat_t, fh uint64) int {
 			return -fuse.ENOENT
 		}
 		stat.Mode = fuse.S_IFREG | 0444
+		setTimestamps(stat, item.DateAdded, item.PremiereDate, item.ProductionYear)
 		if cached, ok := fs.nfoCache.Load(path); ok {
 			stat.Size = int64(len(cached.([]byte)))
 		} else {
@@ -141,6 +142,7 @@ func (fs *MediaFS) Getattr(path string, stat *fuse.Stat_t, fh uint64) int {
 			return -fuse.ENOENT
 		}
 		stat.Mode = fuse.S_IFREG | 0444
+		setTimestamps(stat, item.DateAdded, item.PremiereDate, item.ProductionYear)
 		if data, ok, _ := fs.cache.GetArtwork(parts[0], item.ID, string(artType)); ok {
 			stat.Size = int64(len(data))
 		} else {
@@ -168,18 +170,30 @@ func (fs *MediaFS) Getattr(path string, stat *fuse.Stat_t, fh uint64) int {
 
 	if item.IsFolder {
 		dirStat(stat)
+		setTimestamps(stat, item.DateAdded, item.PremiereDate, item.ProductionYear)
 	} else {
 		stat.Mode = fuse.S_IFREG | 0444
 		stat.Size = item.FileSize
-		if item.DateAdded != "" {
-			if t, err := time.Parse(time.RFC3339Nano, item.DateAdded); err == nil {
-				stat.Mtim.Sec = t.Unix()
-				stat.Mtim.Nsec = int64(t.Nanosecond())
-				stat.Atim = stat.Mtim
-				stat.Ctim = stat.Mtim
-				stat.Birthtim = stat.Mtim
+		// Use cached metadata for PremiereDate/Year if available (warmed by NFO Getattr).
+		// If cold, trigger background fetch so next Getattr will have it.
+		premiereDate := item.PremiereDate
+		productionYear := item.ProductionYear
+		var meta connector.ItemMetadata
+		if ok, _ := fs.cache.GetMetadata(parts[0], item.ID, &meta); ok {
+			premiereDate = meta.PremiereDate
+			productionYear = meta.Year
+		} else {
+			srv := fs.serverForKey(parts[0])
+			if srv != nil {
+				go func(srvKey, itemID string) {
+					m, err := srv.Conn.GetItemMetadata(itemID)
+					if err == nil {
+						_ = fs.cache.StoreMetadata(srvKey, itemID, m)
+					}
+				}(parts[0], item.ID)
 			}
 		}
+		setTimestamps(stat, item.DateAdded, premiereDate, productionYear)
 	}
 	return 0
 }
@@ -476,6 +490,40 @@ func (fs *MediaFS) Rename(oldpath, newpath string) int                        { 
 func dirStat(stat *fuse.Stat_t) {
 	stat.Mode = fuse.S_IFDIR | 0555
 	stat.Nlink = 2
+}
+
+// setTimestamps sets stat timestamps from a media item's dates.
+// Mtim/Atim/Ctim = dateAdded (DateCreated from server).
+// Birthtim = premiereDate if set, else Jan 1 of productionYear, else Mtim.
+// Tries RFC3339Nano then RFC3339 to handle Jellyfin/Emby's variable decimal precision.
+func setTimestamps(stat *fuse.Stat_t, dateAdded, premiereDate string, productionYear int) {
+	parseDate := func(s string) (time.Time, bool) {
+		for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
+			if t, err := time.Parse(layout, s); err == nil {
+				return t, true
+			}
+		}
+		return time.Time{}, false
+	}
+
+	t, ok := parseDate(dateAdded)
+	if !ok {
+		return
+	}
+	stat.Mtim.Sec = t.Unix()
+	stat.Mtim.Nsec = int64(t.Nanosecond())
+	stat.Atim = stat.Mtim
+	stat.Ctim = stat.Mtim
+
+	if birth, ok := parseDate(premiereDate); ok {
+		stat.Birthtim.Sec = birth.Unix()
+		stat.Birthtim.Nsec = int64(birth.Nanosecond())
+	} else if productionYear > 0 {
+		birth := time.Date(productionYear, 1, 1, 0, 0, 0, 0, time.UTC)
+		stat.Birthtim.Sec = birth.Unix()
+	} else {
+		stat.Birthtim = stat.Mtim
+	}
 }
 
 func splitPath(path string) []string {

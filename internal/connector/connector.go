@@ -39,9 +39,11 @@ type MediaItem struct {
 	Name      string
 	Type      ItemType
 	IsFolder  bool
-	FileSize  int64  // 0 for folders
-	DateAdded string // ISO 8601 from server, used for mtime
-	Extension string // file extension with leading dot, e.g. ".mkv" (empty for folders)
+	FileSize       int64  // 0 for folders
+	DateAdded      string // ISO 8601 from server, used for mtime
+	Extension      string // file extension with leading dot, e.g. ".mkv" (empty for folders)
+	ProductionYear int    // not available from GetItems; kept for future use
+	PremiereDate   string // not available from GetItems; kept for future use
 }
 
 // VFSName returns the name as it appears in the virtual filesystem.
@@ -70,6 +72,7 @@ type ItemMetadata struct {
 	ExternalIDs   map[string]string // "imdb" → "tt1375666", etc.
 	SeasonNumber  int
 	EpisodeNumber int
+	PremiereDate  string // ISO 8601 release date, used for birthtim
 }
 
 // MediaConnector is the interface all server connectors must implement.
