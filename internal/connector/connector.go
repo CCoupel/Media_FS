@@ -1,6 +1,31 @@
 package connector
 
-import "github.com/CCoupel/Media_FS/internal/config"
+import (
+	"strings"
+
+	"github.com/CCoupel/Media_FS/internal/config"
+)
+
+// illegalChars maps characters that are illegal in filesystem names (Windows
+// NTFS forbids all of them; Linux/FUSE forbids only '/' and NUL) to visually
+// similar Unicode fullwidth equivalents so titles remain readable.
+var illegalChars = strings.NewReplacer(
+	"/", "∕",  // U+2215 DIVISION SLASH   — path separator on all OSes
+	"\\", "＼", // U+FF3C FULLWIDTH REVERSE SOLIDUS
+	":", "：",  // U+FF1A FULLWIDTH COLON
+	"*", "＊",  // U+FF0A FULLWIDTH ASTERISK
+	"?", "？",  // U+FF1F FULLWIDTH QUESTION MARK
+	"\"", "＂", // U+FF02 FULLWIDTH QUOTATION MARK
+	"<", "＜",  // U+FF1C FULLWIDTH LESS-THAN SIGN
+	">", "＞",  // U+FF1E FULLWIDTH GREATER-THAN SIGN
+	"|", "｜",  // U+FF5C FULLWIDTH VERTICAL LINE
+)
+
+// sanitizeName replaces characters illegal in filesystem names with
+// visually-similar Unicode fullwidth equivalents.
+func sanitizeName(s string) string {
+	return illegalChars.Replace(s)
+}
 
 // ArtworkType represents the type of artwork to retrieve.
 type ArtworkType string
@@ -49,11 +74,13 @@ type MediaItem struct {
 // VFSName returns the name as it appears in the virtual filesystem.
 // For media files it appends the extension (e.g. "Inception (2010).mkv").
 // For folders the plain Name is returned.
+// Characters illegal in filesystem names (e.g. '/', ':' on Windows) are
+// replaced with Unicode fullwidth equivalents so every title is a valid entry.
 func (m MediaItem) VFSName() string {
 	if !m.IsFolder && m.Extension != "" {
-		return m.Name + m.Extension
+		return sanitizeName(m.Name) + m.Extension
 	}
-	return m.Name
+	return sanitizeName(m.Name)
 }
 
 // ItemMetadata holds the full metadata for a media item.

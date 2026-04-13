@@ -111,6 +111,8 @@ func (c *Client) GetLibraries() ([]connector.Library, error) {
 func (c *Client) GetItems(libraryID, parentID string) ([]connector.MediaItem, error) {
 	isMovieSection := c.movieSections != nil && c.movieSections[libraryID]
 
+	guids := url.Values{"includeGuids": {"1"}}
+
 	if parentID != "" {
 		// "grp:{k1},{k2},..." — expand group into numbered sub-folders.
 		if strings.HasPrefix(parentID, "grp:") {
@@ -120,19 +122,19 @@ func (c *Client) GetItems(libraryID, parentID string) ([]connector.MediaItem, er
 		if isMovieSection {
 			return c.fetchMovieFiles(parentID)
 		}
-		return c.fetchAllItems(fmt.Sprintf("/library/metadata/%s/children", parentID))
+		// Children (seasons, episodes): GUIDs not needed for naming.
+		return c.fetchAllItems(fmt.Sprintf("/library/metadata/%s/children", parentID), nil)
 	}
 
 	if !isMovieSection {
-		return c.fetchAllItems(fmt.Sprintf("/library/sections/%s/all", libraryID))
+		// Section root (shows, music): include GUIDs for "Title (Year) [guid]" naming.
+		return c.fetchAllItems(fmt.Sprintf("/library/sections/%s/all", libraryID), guids)
 	}
 
-	// Movie section root: fetch without includeGuids to keep responses small
-	// and fast (GUIDs add ~10× more XML per item). Year-based disambiguation
-	// is used instead of IMDB/TMDB IDs.
+	// Movie section root: include GUIDs for "Title (Year) [imdb-...]" folder names.
 	rawItems, err := c.fetchAllXMLItems(
 		fmt.Sprintf("/library/sections/%s/all", libraryID),
-		nil,
+		guids,
 	)
 	if err != nil {
 		return nil, err
@@ -162,7 +164,7 @@ func buildMovieFolders(rawItems []xmlItem) []connector.MediaItem {
 			log.Printf("[plex] buildMovieFolders: skipping non-movie item %q (type=%s ratingKey=%s)", it.Title, it.Type, it.RatingKey)
 			continue
 		}
-		name := movieFolderName(it)
+		name := folderName(it)
 		if _, exists := groups[name]; !exists {
 			order = append(order, name)
 			mi := mapXMLItem(it)
@@ -229,7 +231,7 @@ func (c *Client) fetchMovieFiles(movieID string) ([]connector.MediaItem, error) 
 	item := mapXMLItem(raw.Videos[0])
 	// Ensure the file item carries the same display name as its parent folder
 	// so NFO/artwork path resolution (base-name matching) works correctly.
-	item.Name = movieFolderName(raw.Videos[0])
+	item.Name = folderName(raw.Videos[0])
 	if item.FileSize == 0 {
 		log.Printf("[plex] fetchMovieFiles %s (%q): FileSize=0 — Media/Part missing or size absent in XML", movieID, item.Name)
 	}
@@ -239,23 +241,28 @@ func (c *Client) fetchMovieFiles(movieID string) ([]connector.MediaItem, error) 
 	return []connector.MediaItem{item}, nil
 }
 
-// movieFolderName returns the VFS folder/file base name for a movie.
+// folderName returns the VFS folder name for a media item (movie or series root).
+// Format: "Title (Year) [imdb-tt...]" — unique, readable, Kodi-compatible.
 // Modern PMS (≥1.23) includes <Guid> elements in listing responses without
 // needing includeGuids=1, so GUID-based disambiguation is free. Falls back
-// to "Title (Year)" (Kodi-compatible) when no GUID is available.
-func movieFolderName(it xmlItem) string {
+// to "Title (Year)" when no GUID is available.
+func folderName(it xmlItem) string {
+	year := ""
+	if it.Year != "" && it.Year != "0" {
+		year = fmt.Sprintf(" (%s)", it.Year)
+	}
 	for _, g := range it.Guids {
 		switch {
 		case strings.HasPrefix(g.ID, "imdb://"):
-			return fmt.Sprintf("%s {imdb-%s}", it.Title, strings.TrimPrefix(g.ID, "imdb://"))
+			return fmt.Sprintf("%s%s [imdb-%s]", it.Title, year, strings.TrimPrefix(g.ID, "imdb://"))
 		case strings.HasPrefix(g.ID, "tmdb://"):
-			return fmt.Sprintf("%s {tmdb-%s}", it.Title, strings.TrimPrefix(g.ID, "tmdb://"))
+			return fmt.Sprintf("%s%s [tmdb-%s]", it.Title, year, strings.TrimPrefix(g.ID, "tmdb://"))
 		case strings.HasPrefix(g.ID, "tvdb://"):
-			return fmt.Sprintf("%s {tvdb-%s}", it.Title, strings.TrimPrefix(g.ID, "tvdb://"))
+			return fmt.Sprintf("%s%s [tvdb-%s]", it.Title, year, strings.TrimPrefix(g.ID, "tvdb://"))
 		}
 	}
-	if it.Year != "" && it.Year != "0" {
-		return fmt.Sprintf("%s (%s)", it.Title, it.Year)
+	if year != "" {
+		return it.Title + year
 	}
 	return it.Title
 }
@@ -576,8 +583,8 @@ func (c *Client) fetchAllXMLItems(path string, extra url.Values) ([]xmlItem, err
 	return all, nil
 }
 
-func (c *Client) fetchAllItems(path string) ([]connector.MediaItem, error) {
-	raw, err := c.fetchAllXMLItems(path, nil)
+func (c *Client) fetchAllItems(path string, extra url.Values) ([]connector.MediaItem, error) {
+	raw, err := c.fetchAllXMLItems(path, extra)
 	if err != nil {
 		return nil, err
 	}
@@ -617,10 +624,16 @@ func mapXMLItem(it xmlItem) connector.MediaItem {
 
 	year, _ := strconv.Atoi(it.Year)
 
+	// Apply "Title (Year) [guid]" naming to series roots for uniqueness.
+	name := it.Title
+	if it.Type == "show" || it.Type == "artist" {
+		name = folderName(it)
+	}
+
 	return connector.MediaItem{
 		ID:             it.RatingKey,
 		ParentID:       it.ParentKey,
-		Name:           it.Title,
+		Name:           name,
 		Type:           plexTypeToItemType(it.Type),
 		IsFolder:       isFolder,
 		FileSize:       size,
