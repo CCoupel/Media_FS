@@ -156,6 +156,12 @@ func buildMovieFolders(rawItems []xmlItem) []connector.MediaItem {
 		if it.RatingKey == "" {
 			continue // skip malformed Plex items (e.g. collection placeholders)
 		}
+		// Skip non-movie entries (e.g. type="collection" Directory items that Plex
+		// includes in movie section listings alongside Video elements).
+		if it.Type != "" && it.Type != "movie" {
+			log.Printf("[plex] buildMovieFolders: skipping non-movie item %q (type=%s ratingKey=%s)", it.Title, it.Type, it.RatingKey)
+			continue
+		}
 		name := movieFolderName(it)
 		if _, exists := groups[name]; !exists {
 			order = append(order, name)
@@ -234,8 +240,20 @@ func (c *Client) fetchMovieFiles(movieID string) ([]connector.MediaItem, error) 
 }
 
 // movieFolderName returns the VFS folder/file base name for a movie.
-// Falls back to "Title (Year)" which is both readable and Kodi-compatible.
+// Modern PMS (≥1.23) includes <Guid> elements in listing responses without
+// needing includeGuids=1, so GUID-based disambiguation is free. Falls back
+// to "Title (Year)" (Kodi-compatible) when no GUID is available.
 func movieFolderName(it xmlItem) string {
+	for _, g := range it.Guids {
+		switch {
+		case strings.HasPrefix(g.ID, "imdb://"):
+			return fmt.Sprintf("%s {imdb-%s}", it.Title, strings.TrimPrefix(g.ID, "imdb://"))
+		case strings.HasPrefix(g.ID, "tmdb://"):
+			return fmt.Sprintf("%s {tmdb-%s}", it.Title, strings.TrimPrefix(g.ID, "tmdb://"))
+		case strings.HasPrefix(g.ID, "tvdb://"):
+			return fmt.Sprintf("%s {tvdb-%s}", it.Title, strings.TrimPrefix(g.ID, "tvdb://"))
+		}
+	}
 	if it.Year != "" && it.Year != "0" {
 		return fmt.Sprintf("%s (%s)", it.Title, it.Year)
 	}
@@ -520,8 +538,8 @@ func (c *Client) fetchAllXMLItems(path string, extra url.Values) ([]xmlItem, err
 	}
 	all := mergeItems(first)
 	total := first.TotalSize
-	if total <= 0 || len(all) >= total || len(all) < plexPageSize {
-		return all, nil // single page or server didn't report total
+	if total <= 0 || len(all) >= total {
+		return all, nil // no totalSize reported, or all items fit in first page
 	}
 
 	// Build the list of remaining page offsets.
