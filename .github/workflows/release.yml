@@ -16,11 +16,12 @@ env:
 # Guarantees:
 #   1. The only authoritative version declaration is internal/version/version.go
 #   2. No other .go file hardcodes a vX.Y.Z version string
-#   3. go vet passes on all packages
+#   3. go build / go vet / go test / govulncheck pass on all non-CGO packages
+# All checks live in scripts/ci.sh (single CI script, shared with ci-branch.yml and local QA).
 # Both build jobs depend on this job — a failure blocks the release.
 jobs:
   verify:
-    name: Verify version references
+    name: Verify (scripts/ci.sh)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6.0.2
@@ -30,26 +31,8 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Check no hardcoded version outside version.go
-        run: |
-          bad=$(grep -rn --include="*.go" 'Version\s*=\s*"v[0-9]' . \
-                | grep -v 'internal/version/version.go' || true)
-          if [ -n "$bad" ]; then
-            echo "❌ Hardcoded version string found outside internal/version/version.go:"
-            echo "$bad"
-            exit 1
-          fi
-          echo "✓ Version reference is clean"
-
-      - name: go vet
-        env:
-          CGO_ENABLED: '0'
-        run: |
-          # internal/vfs and cmd/mediafs import cgofuse which requires platform
-          # headers (WinFSP / libfuse). They are fully compiled in the build jobs.
-          # Vet everything else (config, cache, connector, downloader, webui, …).
-          PKGS=$(go list ./... | grep -v -E 'github\.com/CCoupel/Media_FS/(internal/vfs|cmd/mediafs)$')
-          go vet $PKGS
+      - name: CI
+        run: bash scripts/ci.sh
 
 # ─── build (parallel) ─────────────────────────────────────────────────────────
 
@@ -78,7 +61,7 @@ jobs:
           Copy-Item "C:\Program Files (x86)\WinFsp\lib\winfsp-x64.lib" C:\winfsp\lib\libwinfsp.a
 
       - name: Install go-winres
-        run: go install github.com/tc-hib/go-winres@latest
+        run: go install github.com/tc-hib/go-winres@v0.3.3
 
       - name: Generate Windows resources (exe icon + version metadata)
         shell: pwsh
@@ -167,7 +150,7 @@ jobs:
           path: dist/
 
       - name: Install nfpm
-        run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+        run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.48.0
 
       - name: Build DEB
         run: |
@@ -201,7 +184,7 @@ jobs:
       - name: Install rpm tools + nfpm
         run: |
           sudo apt-get update && sudo apt-get install -y rpm
-          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.48.0
 
       - name: Build RPM
         run: |
@@ -226,6 +209,9 @@ jobs:
         with:
           merge-multiple: true
           path: dist/
+
+      - name: Checksums
+        run: cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS
 
       - name: Create Release
         uses: softprops/action-gh-release@v2.6.1

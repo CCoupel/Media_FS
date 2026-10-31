@@ -1,0 +1,26 @@
+name: CI (pre-validation)
+
+# Pré-validation sans publication (contrat C10) : même script que la release (scripts/ci.sh, C11).
+on:
+  push:
+    branches:
+      - 'milestone/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: scripts/ci.sh
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - uses: actions/setup-go@v6.4.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: CI
+        run: bash scripts/ci.sh
