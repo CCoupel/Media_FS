@@ -39,4 +39,3 @@ _work/
 .claude/workflow/
 .claude/worktrees/
 build/
-!.claude/commands/dev-issue.md

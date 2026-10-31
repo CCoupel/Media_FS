@@ -306,7 +306,6 @@ golangci-lint run                      # lint
 | Commande | Rôle |
 |---|---|
 | `/marketing` | Site marketing GitHub Pages (template — agent `marketing-release`, worktree `MARKETING/` de `gh-pages`) |
-| `/dev-issue <N>` | Commande projet antérieure au template (préférer `/feature #<N>` / `/bugfix #<N>`) : workflow complet de développement pour une issue (analyse → branch → workshop → plan → test → dev → build → QA → review → PR) |
 
 ## Versioning
 
@@ -318,20 +317,11 @@ Semantic Versioning — version déclarée dans `internal/version/version.go` (v
 | `minor` (0.x.0) | Nouvelle feature, nouvelle commande CLI, nouveau connecteur |
 | `major` (x.0.0) | Changement breaking (interface connector, format config.yaml) |
 
-Branches : `feat/issue-{N}-{slug}` ou `fix/issue-{N}-{slug}`
-Tags : créés à la merge de PR (`v0.2.0`, etc.)
+Branches, tags et version de dev (`X.Y.Z.a`) : voir « Conventions Git » ci-dessus (`milestone/vX.Y.Z`, tag `vX.Y.Z` au PUBLISH PROD).
 
 ## Backlog
 
-16 issues actives organisées en 5 épiques :
-
-| Épique | Issues | Priorité |
-|---|---|---|
-| [#17 Epic P0 — Core VFS](https://github.com/CCoupel/Media_FS/issues/17) | #1 #2 #3 #4 #5 #6 #7 #8 | MVP |
-| [#18 Epic P1.1 — Métadonnées](https://github.com/CCoupel/Media_FS/issues/18) | #9 #10 #11 #12 | Post-MVP |
-| [#19 Epic P1.2 — Shell Properties](https://github.com/CCoupel/Media_FS/issues/19) | #13 | Post-MVP |
-| [#20 Epic P3 — Plex](https://github.com/CCoupel/Media_FS/issues/20) | #14 | Future |
-| [#21 Epic Infrastructure](https://github.com/CCoupel/Media_FS/issues/21) | #15 #16 | Transverse |
+Backlog vivant : GitHub Issues (`/backlog`, `/milestone status`). Épiques : [#17 P0 Core VFS](https://github.com/CCoupel/Media_FS/issues/17), [#18 P1.1 Métadonnées](https://github.com/CCoupel/Media_FS/issues/18), [#19 P1.2 Shell Properties](https://github.com/CCoupel/Media_FS/issues/19), [#20 P3 Plex](https://github.com/CCoupel/Media_FS/issues/20), [#21 Infrastructure](https://github.com/CCoupel/Media_FS/issues/21).
 
 ## Key constraints
 
