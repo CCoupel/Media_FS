@@ -21,7 +21,7 @@
 
 ## Regles critiques
 
-- Go absent du PATH WSL : `/usr/local/go/bin/go` (paquets sans CGO) ; build complet cote Windows (WinFSP + MinGW, voir CLAUDE.md)
+- Agents exécutés dans le conteneur Claude-Launcher (`.claude-launcher/env.yaml`) : chaîne Linux native (Go 1.25.5, gcc, libfuse-dev), `commands.build` = build Linux `dist/mediafs` CGO compris ; jamais de binaire Windows en boucle DEV/tests. Le `.exe` Windows (WinFSP + MinGW) est produit par la CI ou à la main (`CLAUDE.md` § Build & Run)
 
 ## Corrections de comportement
 

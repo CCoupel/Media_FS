@@ -134,7 +134,7 @@
     ]
   },
   "commands": {
-    "build": "CGO_ENABLED=1 CGO_CFLAGS=\"-IC:/winfsp/inc/fuse\" CGO_LDFLAGS=\"-LC:/winfsp/lib -lwinfsp\" go build -o dist/mediafs.exe ./cmd/mediafs",
+    "build": "CGO_ENABLED=1 go build -o dist/mediafs ./cmd/mediafs",
     "test": "go test ./...",
     "lint": "golangci-lint run",
     "audit": "govulncheck ./...",
