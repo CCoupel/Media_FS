@@ -34,32 +34,35 @@
 
 | Nom | Rôle | Fichier | Spawn |
 |-----|------|---------|-------|
-| `planner` | Plan d'implémentation + contrats API | `.claude/agents/implementation-planner.template.md` | permanent |
-| `dev-backend` | Backend (Go 1.25 / CGO cgofuse) — `cmd/**`, `internal/**`, `pkg/**`, `tools/**` | `.claude/agents/dev-backend.template.md` | permanent |
-| `test-writer` | Scripts de tests + procédures QA | `.claude/agents/test-writer.template.md` | permanent |
-| `code-reviewer` | Revue de code | `.claude/agents/code-reviewer.template.md` | permanent |
-| `qa` | Exécution des tests et validation | `.claude/agents/qa.template.md` | permanent |
-| `doc-updater` | Documentation | `.claude/agents/doc-updater.template.md` | permanent |
-| `deployer` | Build + Publication + Déploiement QUALIF/PROD | `.claude/agents/deploy.template.md` | permanent |
+| `planner` | Plan d'implémentation + contrats API | `.claude/agents/implementation-planner.template.md` | socle |
+| `dev-backend` | Backend (Go 1.25 / CGO cgofuse) — `cmd/**`, `internal/**`, `pkg/**`, `tools/**` | `.claude/agents/dev-backend.template.md` | milestone |
+| `test-writer` | Scripts de tests + procédures QA | `.claude/agents/test-writer.template.md` | milestone |
+| `code-reviewer` | Revue de code | `.claude/agents/code-reviewer.template.md` | milestone |
+| `qa` | Exécution des tests et validation | `.claude/agents/qa.template.md` | milestone |
+| `doc-updater` | Documentation | `.claude/agents/doc-updater.template.md` | milestone |
+| `deployer` | Build + Publication + Déploiement QUALIF/PROD | `.claude/agents/deploy.template.md` | socle |
 | `security` | Audit sécurité | `.claude/agents/security.template.md` | ponctuel |
 | `infra` | Infrastructure (si configurée) | `.claude/agents/infra.template.md` | ponctuel |
+| `marketing` | Communication de release (release notes, posts, site `gh-pages`) | `.claude/agents/marketing-release.template.md` | ponctuel |
 
 > **Agents `dev-*`** : une ligne par agent de stack inscrit au registre des agents (`agents.registry[]` de
 > `project-config.json`) — les lignes des stacks non configurées sont retirées. Plusieurs instances d'une même
-> catégorie (ex. `| dev-firmware-capteur | Firmware capteur (ESP32) — firmware/sensor/** | .claude/agents/dev-firmware-capteur.template.md | permanent |`)
+> catégorie (ex. `| dev-firmware-capteur | Firmware capteur (ESP32) — firmware/sensor/** | .claude/agents/dev-firmware-capteur.template.md | milestone |`)
 > ont chacune leur ligne, leur rôle et leur périmètre ; une stack sans template dédié utilise `dev-generic`
 > (stack définie par le compagnon `<nom>.md`, obligatoire).
+
+> **Spawn** (`agents/context/MILESTONE_CADRAGE.md` 4.1) : `socle` = au `/start-session`, toujours ; `milestone` = si
+> l'agent est dans la team du milestone, validée au GATE 2 (la team d'un milestone en cours est respawnée au
+> `/start-session`) ; `ponctuel` = à la demande, puis arrêté. Valeur historique `permanent` = `socle`.
 
 > **Fichier** pointe vers le `.template.md` — géré par sync, toujours présent. Un compagnon
 > `.md` (sans suffixe) peut exister à côté pour des adaptations projet ; il est optionnel et
 > n'est jamais référencé ici puisqu'il ne contient jamais la définition complète de l'agent.
 
 > **Agents génériques** (projets non-dev) : une ligne par instance déclarée à l'init (`agents.generic[]`
-> de `project-config.json`), ex. `| redacteur-pptx | <rôle> | .claude/agents/generic.template.md + generic.redacteur-pptx.md | permanent |`.
+> de `project-config.json`), ex. `| redacteur-pptx | <rôle> | .claude/agents/generic.template.md + generic.redacteur-pptx.md | socle |`.
 > Le template `generic` est commun ; la spécification de chaque instance vit dans `.claude/agents/generic.<nom>.md`.
 
-> **permanent** = spawné au `/start-session`, reste en IDLE toute la session.  
-> **ponctuel** = spawné à la demande par la commande dédiée, fermé après DONE.
 
 > Pour `deployer` : la procédure concrète de PUBLISH/DEPLOY (un fichier par tâche × environnement)
 > vit dans `.claude/agents/environments/{publish,deploy}.<env>.md` — voir `agents/deploy.md`
@@ -118,7 +121,7 @@ Tu **coordonnes et dispatches**. Tu n'exécutes aucune tâche technique toi-mêm
 | Outil interdit | Déléguer à |
 |---------------|-----------|
 | `Edit`, `Write`, `MultiEdit` (sauf `Write` d'un ordre dans `_work/tasks/*.md` et de l'état `.claude/workflow-state.json`, `.claude/workflow/*`) | `dev-*`, `doc-updater` |
-| `Bash` (build / test / git) | `qa`, `deployer`, `dev-*` |
+| `Bash` (build / test / git) — sauf opérations HEAD du checkout principal (`checkout`, `switch`, `reset`, `stash`), qui sont au teamleader seul (`agents/context/COMMON.md` « Branche Courante ») | `qa`, `deployer`, `dev-*` |
 | `Read` (code applicatif) | `code-reviewer`, `planner` |
 | `Glob`, `Grep` (recherche code) | `planner`, `dev-*` |
 
@@ -130,8 +133,15 @@ Tu **coordonnes et dispatches**. Tu n'exécutes aucune tâche technique toi-mêm
 
 ### Dispatcher une tâche
 
-Tous les teammates sont spawned au démarrage (`/start-session`) et sont en IDLE.
-**Pendant la session : uniquement `SendMessage` — jamais de spawn.**
+Les agents `socle` sont spawnés au démarrage (`/start-session`) ; la team du milestone l'est au GATE 2 (`agents/context/MILESTONE_CADRAGE.md`). Tous attendent en IDLE.
+**Pendant la session : uniquement `SendMessage` — jamais de spawn**, sauf : la team d'un milestone, spawnée à
+l'application de son cadrage (GATE 2 — `agents/context/MILESTONE_CADRAGE.md` section 4) ; les agents `ponctuel` de la
+table (`security`, `infra`, `marketing`…), spawnés à la demande puis arrêtés (`TaskStop`) ; un agent de l'effectif
+attendu (socle + team du milestone) perdu ou absent — respawné avant de lui envoyer un ordre.
+
+**Teammates perdus** (Claude Code annonce « tes teammates ont été perdus… relance les teammates nécessaires ») :
+respawner **tout** l'effectif attendu — socle + `cadrage.team` — et pas seulement les agents des tâches en cours,
+puis reprendre comme `/start-session` étape 4bis (`agents/context/MILESTONE_CADRAGE.md` 4.2).
 
 ```
 SendMessage({ to: "<nom-canonique>", content: "<tâche complète>" })
@@ -178,7 +188,7 @@ une ligne, sans attendre le DONE. Un jalon n'est pas un DONE : ne pas enchaîner
 
 Mettre à jour les labels de **toutes** les issues suivies (`ISSUE_NUMS[]`) **avant** d'envoyer l'ordre suivant, **et dès l'événement** (retour de fin de tâche d'un teammate `DONE`/`FAILED`/`BLOQUE`, validation d'un GATE — `GITHUB.md` §9.12), avant de le relayer. L'état dit ce qui **reste à faire** (ex. `PRET` = plan validé, DEV pas lancé), pas ce qu'un teammate fait à cet instant :
 `SendMessage` à `deployer` (`gh issue edit --add-label … --remove-label …`, `.claude/commands/context/GITHUB.template.md` §9).
-La clôture du milestone reste soumise à la validation utilisateur.
+Fermeture des issues sur CI verte, ou à la validation utilisateur si `project-config.json` → `issues.close_on` = `validation` (`GITHUB.md` §9.5). La clôture du milestone reste soumise à la validation utilisateur.
 
 ### Validation des rapports DONE
 
@@ -214,6 +224,29 @@ SendMessage({
 - Branche courante : fixée par le teamleader seul ; les agents ne font ni `checkout`/`switch`/`reset` ni retour à un commit précédent dans le checkout principal (`BRANCH REQUEST` au teamleader) — voir `agents/context/COMMON.md`.
 - Ces dossiers sont gitignorés (`_work/`, `.claude/worktrees/`) — ne jamais les commiter.
 - Si un outil impose un emplacement externe, rediriger via `TMPDIR=$PWD/_work/tmp` ; en cas d'impossibilité, **BLOQUE** et demande au teamleader/utilisateur.
+
+---
+
+## Éléments privés — dossier `PRIVATE/`
+
+**Tout élément privé qui ne doit jamais être commité se range dans `PRIVATE/`** (racine du projet, gitignoré) :
+accès aux environnements (kubeconfig, tokens Kubernetes et de comptes de service, clés SSH, JSON de compte
+cloud, certificats `*.pem`/`*.key`, keystores), comptes et identifiants notés, exports et dumps de données
+réelles, documents client ou contractuels, notes personnelles, configuration locale propre à un poste.
+
+| Élément | Emplacement |
+|---------|-------------|
+| Élément privé durable (voir ci-dessus) | `PRIVATE/` (ex. `PRIVATE/k8s/kubeconfig-prod`, `PRIVATE/ssh/deploy_key`) |
+| Variables lues par `/deploy` (globales, par environnement) | `.env`, `.claude/agents/environments/<env>.env` — emplacements fixes sourcés par les scripts, **pas** dans `PRIVATE/` ; une variable qui désigne un fichier d'accès pointe dans `PRIVATE/` (ex. `KUBECONFIG=PRIVATE/k8s/kubeconfig-prod`) |
+| Fichier temporaire de travail | `_work/tmp/` (purgé, pas un stockage durable) |
+
+- Avant de créer un fichier contenant une donnée privée : le placer dans `PRIVATE/` ; le code et la config trackés
+  ne référencent `PRIVATE/` que par chemin relatif, jamais par copie de son contenu.
+- Élément privé trouvé tracké hors `PRIVATE/` : **BLOQUE** et signaler au teamleader (déplacement + `git rm --cached`
+  décidés par l'utilisateur ; un secret déjà poussé reste dans l'historique → rotation à prévoir).
+- Ne jamais retirer `PRIVATE/` du `.gitignore` ni forcer son ajout (`git add -f`).
+- Le contenu attendu de `PRIVATE/` est établi par `/init-project` (Étape 10b) ; un worktree n'en hérite pas —
+  copier depuis le checkout principal ce qui est nécessaire, comme pour `.env`.
 
 ---
 

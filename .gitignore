@@ -39,3 +39,4 @@ _work/
 .claude/workflow/
 .claude/worktrees/
 build/
+PRIVATE/

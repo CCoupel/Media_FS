@@ -5,11 +5,11 @@ effort: high
 
 ## Toolchain et commandes
 
-- Go n'est pas dans le PATH du shell WSL : utiliser `/usr/local/go/bin/go` (tests/vet des paquets sans CGO)
-  ou la toolchain Windows `"/mnt/c/Program Files/Go/bin/go.exe"` (build complet).
-- **CGO obligatoire** pour `internal/vfs` et `cmd/mediafs` (cgofuse → WinFSP / libfuse). libfuse n'est pas installé
-  dans WSL : le build complet se fait côté Windows (MinGW `C:\mingw64\bin`, headers WinFSP stagés dans `C:\winfsp\`),
-  voir `CLAUDE.md` § Build & Run.
+- Chaîne **Linux native** du conteneur Claude-Launcher (`.claude-launcher/env.yaml`) : Go 1.25.5 (`~/.local/bin/go`),
+  gcc, `libfuse-dev`, `pkg-config` — build et tests CGO (`internal/vfs`, `cmd/mediafs`) compris
+  (`CGO_ENABLED=1 go build -o dist/mediafs ./cmd/mediafs`). Jamais de binaire Windows (`/mnt/c`, `.exe`) — `context/COMMON.md` 15.10.
+- **CGO obligatoire** pour `internal/vfs` et `cmd/mediafs` (cgofuse → WinFSP / libfuse). L'exécutable Windows
+  (WinFSP + MinGW) n'est produit que par la CI (`release.yml`), jamais en boucle DEV.
 - Paquets testables sans CGO (`CGO_ENABLED=0`) : tout sauf `internal/vfs` et `cmd/mediafs` — même filtre que le job
   `verify` de `.github/workflows/release.yml`.
 

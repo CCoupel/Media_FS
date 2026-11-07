@@ -8,8 +8,8 @@
   "initialized_at": "2026-10-31T16:15:00+01:00",
   "initialized_from": "analysis",
   "template_version": {
-    "tag": "v3.29.2",
-    "commit": "a4276ee30b3e4adb46183dc9a74235ef2d7c0725"
+    "tag": "v5.1.0",
+    "commit": "4ee23fc2d98b69ce37cb20361c2824ec1fa2aa4b"
   },
   "src_dir": "internal",
   "version_file": "internal/version/version.go",
@@ -143,7 +143,9 @@
     "coverage": "go test -cover ./...",
     "test_fast": "go test -short ./...",
     "test_targeted": "go test {TARGETS}",
-    "smoke": ""
+    "smoke": "",
+    "env": "",
+    "test_related": ""
   },
   "docs": {
     "mockup_dir": "docs/mockup"
@@ -159,115 +161,115 @@
       {
         "name": "cdp",
         "source": "agents/cdp.md",
-        "tag": "v3.29.2",
-        "commit": "a4276ee30b3e4adb46183dc9a74235ef2d7c0725",
-        "sha256": "30da29c70a547aae940c27e00604f5806964ab05498c8ad380a095e353247e25",
-        "changed_in": "v3.29.1"
+        "tag": "v5.1.0",
+        "commit": "4ee23fc2d98b69ce37cb20361c2824ec1fa2aa4b",
+        "sha256": "f5b4497e56c919e379328647c596c4bf9a6bce9909b26c249f51853572893d9c",
+        "changed_in": "v5.1.0"
       },
       {
         "name": "code-reviewer",
         "source": "agents/code-reviewer.md",
-        "tag": "v3.29.2",
-        "commit": "a4276ee30b3e4adb46183dc9a74235ef2d7c0725",
+        "tag": "v5.1.0",
+        "commit": "4ee23fc2d98b69ce37cb20361c2824ec1fa2aa4b",
         "sha256": "6db56bbdc6483602b9284348bb1f2653fa1bc541ef31681697b6bbf98920b5fe",
         "changed_in": "v3.29.1"
       },
       {
         "name": "deploy",
         "source": "agents/deploy.md",
-        "tag": "v3.29.2",
-        "commit": "a4276ee30b3e4adb46183dc9a74235ef2d7c0725",
-        "sha256": "7c5fa902d62f8895fa7a0c71bebeb179b3f7432c59c43459730eb5dc2adbf6ee",
-        "changed_in": "v3.29.1"
+        "tag": "v5.1.0",
+        "commit": "4ee23fc2d98b69ce37cb20361c2824ec1fa2aa4b",
+        "sha256": "b35462dc44f9d1c687b5ef654e644a560a52d6a3ffc41324fc371e351fd322eb",
+        "changed_in": "v5.1.0"
       },
       {
         "name": "dev-backend",
         "source": "templates/dev-backend-go.md",
-        "tag": "v3.29.2",
-        "commit": "a4276ee30b3e4adb46183dc9a74235ef2d7c0725",
-        "sha256": "6fa0b4812a59d4c53cfb2afbd808052214dcf793cd5a66da51351a27fcc47332",
-        "changed_in": "v3.29.1",
+        "tag": "v5.1.0",
+        "commit": "4ee23fc2d98b69ce37cb20361c2824ec1fa2aa4b",
+        "sha256": "d379ae707ffcb3fc04bd090e72bf89befa4a72a7ba15d25e6688286e23b0b7f3",
+        "changed_in": "v5.1.0",
         "role": "Backend (Go 1.25 / CGO cgofuse)"
       },
       {
         "name": "doc-updater",
         "source": "agents/doc-updater.md",
-        "tag": "v3.29.2",
-        "commit": "a4276ee30b3e4adb46183dc9a74235ef2d7c0725",
-        "sha256": "dd2b57b3cdba9c649295d5bd86bea4539728aadce0416c5bfb40275f223baab8",
-        "changed_in": "v3.29.1"
+        "tag": "v5.1.0",
+        "commit": "4ee23fc2d98b69ce37cb20361c2824ec1fa2aa4b",
+        "sha256": "87c296a161f67af7eb441430cf2cb530fa9552b1bb6aa04acb819452ef581074",
+        "changed_in": "v5.1.0"
       },
       {
         "name": "generic",
         "source": "agents/generic.md",
-        "tag": "v3.29.2",
-        "commit": "a4276ee30b3e4adb46183dc9a74235ef2d7c0725",
+        "tag": "v5.1.0",
+        "commit": "4ee23fc2d98b69ce37cb20361c2824ec1fa2aa4b",
         "sha256": "4157f75529762528a54afbfcc50630d772ca8734c8ab693c913bb0d8933f6be7",
         "changed_in": "v3.29.1"
       },
       {
         "name": "implementation-planner",
         "source": "agents/implementation-planner.md",
-        "tag": "v3.29.2",
-        "commit": "a4276ee30b3e4adb46183dc9a74235ef2d7c0725",
-        "sha256": "aaa506eddb0a237da081ec9735f7ef42e616a5bac27479326c8f75bce3f26261",
-        "changed_in": "v3.29.1"
+        "tag": "v5.1.0",
+        "commit": "4ee23fc2d98b69ce37cb20361c2824ec1fa2aa4b",
+        "sha256": "4154a8cb3155d2871913382bf5b8cc00e8a44d810f8730c305d71a4afeebbec9",
+        "changed_in": "v5.1.0"
       },
       {
         "name": "infra",
         "source": "agents/infra.md",
-        "tag": "v3.29.2",
-        "commit": "a4276ee30b3e4adb46183dc9a74235ef2d7c0725",
+        "tag": "v5.1.0",
+        "commit": "4ee23fc2d98b69ce37cb20361c2824ec1fa2aa4b",
         "sha256": "81f8f8de43a2b331e7e1266fce60ac35ef97bbc2f1e62eee6a807d7613f533e7",
         "changed_in": "v3.29.1"
       },
       {
         "name": "marketing-release",
         "source": "agents/marketing-release.md",
-        "tag": "v3.29.2",
-        "commit": "a4276ee30b3e4adb46183dc9a74235ef2d7c0725",
-        "sha256": "d73e32b7001792a9829f5cafc66175a807a564593425b0f13a66e21ac887be9a",
-        "changed_in": "v3.29.1"
+        "tag": "v5.1.0",
+        "commit": "4ee23fc2d98b69ce37cb20361c2824ec1fa2aa4b",
+        "sha256": "763f9ff5f0bba3dd76e135203f316d7517b2f8105ab52622731771c1c8be45de",
+        "changed_in": "v5.1.0"
       },
       {
         "name": "pr-reviewer",
         "source": "agents/pr-reviewer.md",
-        "tag": "v3.29.2",
-        "commit": "a4276ee30b3e4adb46183dc9a74235ef2d7c0725",
+        "tag": "v5.1.0",
+        "commit": "4ee23fc2d98b69ce37cb20361c2824ec1fa2aa4b",
         "sha256": "399fb28b4180b86be96dbb6dab0c483c287a2a660c403adc0a357977d2acb24b",
         "changed_in": "v3.29.1"
       },
       {
         "name": "qa",
         "source": "agents/qa.md",
-        "tag": "v3.29.2",
-        "commit": "a4276ee30b3e4adb46183dc9a74235ef2d7c0725",
-        "sha256": "0e22c6afb97c592cf8b0c561d1978371963a61a51929deb22130fda62cf56c6c",
-        "changed_in": "v3.29.1"
+        "tag": "v5.1.0",
+        "commit": "4ee23fc2d98b69ce37cb20361c2824ec1fa2aa4b",
+        "sha256": "95141e7a8648ff7368fd34ed3a27bcbe4bfbeb77292acd1f91090268a2a10d2b",
+        "changed_in": "v5.1.0"
       },
       {
         "name": "security",
         "source": "agents/security.md",
-        "tag": "v3.29.2",
-        "commit": "a4276ee30b3e4adb46183dc9a74235ef2d7c0725",
+        "tag": "v5.1.0",
+        "commit": "4ee23fc2d98b69ce37cb20361c2824ec1fa2aa4b",
         "sha256": "c92fc9d89ba987149dee4e7a7442cae784267ff15e43100bc0e357e21547bc54",
         "changed_in": "v3.29.1"
       },
       {
         "name": "teamleader",
         "source": "agents/teamleader.md",
-        "tag": "v3.29.2",
-        "commit": "a4276ee30b3e4adb46183dc9a74235ef2d7c0725",
-        "sha256": "98d0f3b9c9a9661dc2d32599a9237fb9eeba83bd35afa286c0ae2b37f0a3b223",
-        "changed_in": "v3.29.1"
+        "tag": "v5.1.0",
+        "commit": "4ee23fc2d98b69ce37cb20361c2824ec1fa2aa4b",
+        "sha256": "a1d8b3c5ab5f25e88ea4d43dc8a28a0c750c17bedf72e037fba0c00b51e4308d",
+        "changed_in": "v5.1.0"
       },
       {
         "name": "test-writer",
         "source": "agents/test-writer.md",
-        "tag": "v3.29.2",
-        "commit": "a4276ee30b3e4adb46183dc9a74235ef2d7c0725",
-        "sha256": "5b4b6fc94d68be1f4c6e050c801afdbdac21fe77c7ea87a37a98440cd074f53c",
-        "changed_in": "v3.29.1"
+        "tag": "v5.1.0",
+        "commit": "4ee23fc2d98b69ce37cb20361c2824ec1fa2aa4b",
+        "sha256": "b0459ff14215c3f4318954881f9ac2e9f0d8c61b352291f05aeb59a839d342ec",
+        "changed_in": "v5.1.0"
       }
     ]
   },
@@ -276,106 +278,147 @@
       {
         "name": "agents/context/CDP_PHASES_PLAN_DEV",
         "source": "agents/context/CDP_PHASES_PLAN_DEV.md",
-        "tag": "v3.29.2",
-        "commit": "a4276ee30b3e4adb46183dc9a74235ef2d7c0725",
-        "sha256": "0543a2eba88ba41dd1bcca60af44845004f62e07561be061e7b5fb8086eefb69",
-        "changed_in": "v3.29.1"
+        "tag": "v5.1.0",
+        "commit": "4ee23fc2d98b69ce37cb20361c2824ec1fa2aa4b",
+        "sha256": "9b174407bea883402f5730bea4e8caae23e3b74b7ab585559ed069c479a3bed3",
+        "changed_in": "v5.1.0"
       },
       {
         "name": "agents/context/CDP_PHASES_RELEASE",
         "source": "agents/context/CDP_PHASES_RELEASE.md",
-        "tag": "v3.29.2",
-        "commit": "a4276ee30b3e4adb46183dc9a74235ef2d7c0725",
-        "sha256": "fde119f9b2a2d2c221d3c7a5a6b3574fa1f0dd51cae952a1f07f7e9db8607a84",
-        "changed_in": "v3.29.1"
+        "tag": "v5.1.0",
+        "commit": "4ee23fc2d98b69ce37cb20361c2824ec1fa2aa4b",
+        "sha256": "1f54a078a1679b1a8b629c9b8ba7e3f5e4c9f7707dfde6f46ce3a25fdaf12bb7",
+        "changed_in": "v5.1.0"
       },
       {
         "name": "agents/context/CDP_PHASES_REVIEW_QA",
         "source": "agents/context/CDP_PHASES_REVIEW_QA.md",
-        "tag": "v3.29.2",
-        "commit": "a4276ee30b3e4adb46183dc9a74235ef2d7c0725",
-        "sha256": "8df71ac20f62a7f178067fb59696d84e5b7b2f6d142191bf72be2136f77fc5c2",
-        "changed_in": "v3.29.1"
+        "tag": "v5.1.0",
+        "commit": "4ee23fc2d98b69ce37cb20361c2824ec1fa2aa4b",
+        "sha256": "af72d03ef2207229f51b18c5ac549a309c03fb84449a6e11cee8953eab772298",
+        "changed_in": "v5.1.0"
       },
       {
         "name": "agents/context/COMMON",
         "source": "agents/context/COMMON.md",
-        "tag": "v3.29.2",
-        "commit": "a4276ee30b3e4adb46183dc9a74235ef2d7c0725",
-        "sha256": "134ae92c3aa9d2e60198e0fba344392a815ecb83498737e31e22cd04b1cd3283",
-        "changed_in": "v3.29.1"
+        "tag": "v5.1.0",
+        "commit": "4ee23fc2d98b69ce37cb20361c2824ec1fa2aa4b",
+        "sha256": "2c93d30c52b8064c6176a59a8d38094e45a43275cff0a7ccfa104ba60b5af287",
+        "changed_in": "v5.1.0"
       },
       {
         "name": "agents/context/DEV_COMMON",
         "source": "agents/context/DEV_COMMON.md",
-        "tag": "v3.29.2",
-        "commit": "a4276ee30b3e4adb46183dc9a74235ef2d7c0725",
-        "sha256": "75e8dd36eb46587c72caecc59cd8a9761252bc538f6e71a843f0b88fac0c73cd",
-        "changed_in": "v3.29.1"
+        "tag": "v5.1.0",
+        "commit": "4ee23fc2d98b69ce37cb20361c2824ec1fa2aa4b",
+        "sha256": "8f07e6f262881b602ad87183ff62cc1198a44955cc039cb4e50893286961925a",
+        "changed_in": "v5.1.0"
       },
       {
         "name": "agents/context/GITHUB",
         "source": "agents/context/GITHUB.md",
-        "tag": "v3.29.2",
-        "commit": "a4276ee30b3e4adb46183dc9a74235ef2d7c0725",
-        "sha256": "bcacfc31442c529218412dd23863104995216690f530ada5abf41b282814c872",
-        "changed_in": "v3.29.1"
+        "tag": "v5.1.0",
+        "commit": "4ee23fc2d98b69ce37cb20361c2824ec1fa2aa4b",
+        "sha256": "fd7a916aeb74465231d0c5ba4dd61587da43d7bf1ad8235bf39a035b9e464163",
+        "changed_in": "v5.1.0"
+      },
+      {
+        "name": "agents/context/MILESTONE_CADRAGE",
+        "source": "agents/context/MILESTONE_CADRAGE.md",
+        "tag": "v5.1.0",
+        "commit": "4ee23fc2d98b69ce37cb20361c2824ec1fa2aa4b",
+        "sha256": "5c2b58457d8a95c00df088c795d15d2da7a469053125a2a815ba0211b73d056b",
+        "changed_in": "v5.1.0"
       },
       {
         "name": "agents/context/TEAMMATES_PROTOCOL",
         "source": "agents/context/TEAMMATES_PROTOCOL.md",
-        "tag": "v3.29.2",
-        "commit": "a4276ee30b3e4adb46183dc9a74235ef2d7c0725",
+        "tag": "v5.1.0",
+        "commit": "4ee23fc2d98b69ce37cb20361c2824ec1fa2aa4b",
         "sha256": "39120cd25cf5d0dd591ae3c76623e62386119f75687b8da2779544a513255d34",
         "changed_in": "v3.29.1"
       },
       {
         "name": "agents/context/VALIDATION_COMMON",
         "source": "agents/context/VALIDATION_COMMON.md",
-        "tag": "v3.29.2",
-        "commit": "a4276ee30b3e4adb46183dc9a74235ef2d7c0725",
-        "sha256": "ae4938603ae9224a84512a20a8e2832a3522b8e18fa6ea81be0a6336d8bd73ab",
-        "changed_in": "v3.29.1"
+        "tag": "v5.1.0",
+        "commit": "4ee23fc2d98b69ce37cb20361c2824ec1fa2aa4b",
+        "sha256": "5d8a206b7aad38d8289daef43c17b81bd7f2b4ee4410eada5c7d2a1129914c77",
+        "changed_in": "v5.1.0"
       },
       {
         "name": "commands/context/CDP_WORKFLOWS",
         "source": "commands/context/CDP_WORKFLOWS.md",
-        "tag": "v3.29.2",
-        "commit": "a4276ee30b3e4adb46183dc9a74235ef2d7c0725",
-        "sha256": "f36d02d48b61ee0fb6d568f1852c36411c645855aadb6954a06a7ee214e9293a",
-        "changed_in": "v3.29.1"
+        "tag": "v5.1.0",
+        "commit": "4ee23fc2d98b69ce37cb20361c2824ec1fa2aa4b",
+        "sha256": "9cda1e279070c289266d28b347486c1f347ea63641f29d4e66062e5d84fbb9c6",
+        "changed_in": "v5.1.0"
       },
       {
         "name": "commands/context/COMMON",
         "source": "commands/context/COMMON.md",
-        "tag": "v3.29.2",
-        "commit": "a4276ee30b3e4adb46183dc9a74235ef2d7c0725",
-        "sha256": "4c9c7b669b383a767b14af8e4520fe5072c6118ed149443dab01ed0439aa1e63",
-        "changed_in": "v3.29.1"
+        "tag": "v5.1.0",
+        "commit": "4ee23fc2d98b69ce37cb20361c2824ec1fa2aa4b",
+        "sha256": "208c66f1b35204d6f039a1ba772a44b4c125a9656c46bfff5ae81264517d556a",
+        "changed_in": "v5.1.0"
       },
       {
         "name": "commands/context/DEVELOPMENT",
         "source": "commands/context/DEVELOPMENT.md",
-        "tag": "v3.29.2",
-        "commit": "a4276ee30b3e4adb46183dc9a74235ef2d7c0725",
-        "sha256": "b74112a1b4bfef6caeee7b34fa79b1eefd6cf4dadbcd49d60d756be4a7ef845d",
-        "changed_in": "v3.29.1"
+        "tag": "v5.1.0",
+        "commit": "4ee23fc2d98b69ce37cb20361c2824ec1fa2aa4b",
+        "sha256": "43f10a9db82309eb6b985e17480c3a71eb6d60ef8b58d868171f90a0a1813438",
+        "changed_in": "v5.1.0"
       },
       {
         "name": "commands/context/GITHUB",
         "source": "commands/context/GITHUB.md",
-        "tag": "v3.29.2",
-        "commit": "a4276ee30b3e4adb46183dc9a74235ef2d7c0725",
-        "sha256": "903f6fea7aacff0dd1bb4334748d3b2f7313bec968b6812fe7a09204beef54f4",
-        "changed_in": "v3.29.1"
+        "tag": "v5.1.0",
+        "commit": "4ee23fc2d98b69ce37cb20361c2824ec1fa2aa4b",
+        "sha256": "92c32f4c721f430e775245d7387df56ceb2f59909d0fce4dbf7bbb5a3211b311",
+        "changed_in": "v5.1.0"
       },
       {
         "name": "commands/context/QUALITY",
         "source": "commands/context/QUALITY.md",
-        "tag": "v3.29.2",
-        "commit": "a4276ee30b3e4adb46183dc9a74235ef2d7c0725",
-        "sha256": "ab47a6e5734069e71de7d50696fa66b90b537781cb45570f0ac749be487de893",
-        "changed_in": "v3.29.1"
+        "tag": "v5.1.0",
+        "commit": "4ee23fc2d98b69ce37cb20361c2824ec1fa2aa4b",
+        "sha256": "642a126dc21e6ec77184e9ee916fa7d2f4b252ab6670f8df6beb19681d603b5c",
+        "changed_in": "v5.1.0"
+      }
+    ]
+  },
+  "milestone": {
+    "defaults": {
+      "patch": "leger",
+      "minor": "complet",
+      "major": "complet"
+    }
+  },
+  "issues": {
+    "close_on": "ci"
+  },
+  "license": {
+    "spdx": null,
+    "source": "deferred"
+  },
+  "launcher_env": {
+    "status": "managed",
+    "updated": "2026-11-07"
+  },
+  "private": {
+    "reviewed": "2026-11-07",
+    "items": [
+      {
+        "path": "PRIVATE/config.test.yaml",
+        "kind": "config.yaml de test avec URL et clés API réelles Jellyfin/Emby/Plex",
+        "origin": "expected"
+      },
+      {
+        "path": "PRIVATE/ACCES.md",
+        "kind": "notes d accès aux serveurs média de test",
+        "origin": "expected"
       }
     ]
   }
